@@ -25,6 +25,21 @@ from beets import autotag
 from beets.library import Item
 
 class AutotagTest(unittest.TestCase):
+    def test_plurality_consensus(self):
+        objs = [1, 1, 1, 1]
+        obj = autotag._plurality(objs)
+        self.assertEqual(obj, 1)
+
+    def test_plurality_near_consensus(self):
+        objs = [1, 1, 2, 1]
+        obj = autotag._plurality(objs)
+        self.assertEqual(obj, 1)
+
+    def test_plurality_conflict(self):
+        objs = [1, 1, 2, 2, 3]
+        obj = autotag._plurality(objs)
+        self.assert_(obj in (1, 2))
+
     def test_current_metadata_finds_pluralities(self):
         items = [Item({'artist': 'The Beetles', 'album': 'The White Album'}),
                  Item({'artist': 'The Beatles', 'album': 'The White Album'}),
@@ -61,7 +76,7 @@ class AlbumsInDirTest(unittest.TestCase):
     
     def test_separates_contents(self):
         found = []
-        for album in autotag.albums_in_dir(self.base):
+        for _, album in autotag.albums_in_dir(self.base):
             found.append(re.search(r'album(.)song', album[0].path).group(1))
         self.assertTrue('1' in found)
         self.assertTrue('2' in found)
@@ -69,7 +84,7 @@ class AlbumsInDirTest(unittest.TestCase):
         self.assertTrue('4' in found)
     
     def test_finds_multiple_songs(self):
-        for album in autotag.albums_in_dir(self.base):
+        for _, album in autotag.albums_in_dir(self.base):
             n = re.search(r'album(.)song', album[0].path).group(1)
             if n == '1':
                 self.assertEqual(len(album), 2)
@@ -111,6 +126,63 @@ class OrderingTest(unittest.TestCase):
         self.assertEqual(ordered[1].title, 'two')
         self.assertEqual(ordered[2].title, 'three')
 
+    def test_order_returns_none_for_length_mismatch(self):
+        items = []
+        items.append(self.item('one', 1))
+        items.append(self.item('two', 2))
+        trackinfo = []
+        trackinfo.append({'title': 'one', 'track': 1})
+        ordered = autotag.order_items(items, trackinfo)
+        self.assertEqual(ordered, None)
+
+    def test_order_corrects_when_track_names_are_entirely_wrong(self):
+        # A real-world test case contributed by a user.
+        def item(i, length):
+            return Item({
+                'artist': 'ben harper',
+                'album': 'burn to shine',
+                'title': 'ben harper - Burn to Shine ' + str(i),
+                'track': i,
+                'length': length,
+                'mb_trackid': '', 'mb_albumid': '', 'mb_artistid': '',
+            })
+        items = []
+        items.append(item(1, 241.37243007106997))
+        items.append(item(2, 342.27781704375036))
+        items.append(item(3, 245.95070222338137))
+        items.append(item(4, 472.87662515485437))
+        items.append(item(5, 279.1759535763187))
+        items.append(item(6, 270.33333768012))
+        items.append(item(7, 247.83435613222923))
+        items.append(item(8, 216.54504531525072))
+        items.append(item(9, 225.72775379800484))
+        items.append(item(10, 317.7643606963552))
+        items.append(item(11, 243.57001238834192))
+        items.append(item(12, 186.45916150485752))
+
+        def info(title, length):
+            return {
+                'title': title,
+                'length': length,
+            }
+        trackinfo = []
+        trackinfo.append(info('Alone', 238.893))
+        trackinfo.append(info('The Woman in You', 341.44))
+        trackinfo.append(info('Less', 245.59999999999999))
+        trackinfo.append(info('Two Hands of a Prayer', 470.49299999999999))
+        trackinfo.append(info('Please Bleed', 277.86599999999999))
+        trackinfo.append(info('Suzie Blue', 269.30599999999998))
+        trackinfo.append(info('Steal My Kisses', 245.36000000000001))
+        trackinfo.append(info('Burn to Shine', 214.90600000000001))
+        trackinfo.append(info('Show Me a Little Shame', 224.09299999999999))
+        trackinfo.append(info('Forgiven', 317.19999999999999))
+        trackinfo.append(info('Beloved One', 243.733))
+        trackinfo.append(info('In the Lord\'s Arms', 186.13300000000001))
+
+        ordered = autotag.order_items(items, trackinfo)
+        for i, item in enumerate(ordered):
+            self.assertEqual(i+1, item.track)
+
 class ApplyTest(unittest.TestCase):
     def setUp(self):
         self.items = []
@@ -119,22 +191,18 @@ class ApplyTest(unittest.TestCase):
         trackinfo = []
         trackinfo.append({
             'title': 'oneNew',
-            'id':    'http://musicbrainz.org/track/dfa939ec-118c-4d0f-'
-                     '84a0-60f3d1e6522c',
+            'id':    'dfa939ec-118c-4d0f-84a0-60f3d1e6522c',
         })
         trackinfo.append({
             'title':  'twoNew',
-            'id':     'http://musicbrainz.org/track/40130ed1-a27c-42fd-'
-                      'a328-1ebefb6caef4',
+            'id':     '40130ed1-a27c-42fd-a328-1ebefb6caef4',
         })
         self.info = {
             'tracks': trackinfo,
             'artist': 'artistNew',
             'album':  'albumNew',
-            'album_id': 'http://musicbrainz.org/release/7edb51cb-77d6-'
-                        '4416-a23c-3a8c2994a2c7',
-            'artist_id': 'http://musicbrainz.org/artist/a6623d39-2d8e-'
-                         '4f70-8242-0a9553b91e50',
+            'album_id': '7edb51cb-77d6-4416-a23c-3a8c2994a2c7',
+            'artist_id': 'a6623d39-2d8e-4f70-8242-0a9553b91e50',
         }
     
     def test_titles_applied(self):

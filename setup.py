@@ -22,14 +22,14 @@ def _read(fn):
     return open(path).read()
 
 setup(name='beets',
-      version='1.0b3',
+      version='1.0b5',
       description='music tagger and library organizer',
       author='Adrian Sampson',
       author_email='adrian@radbox.org',
       url='http://beets.radbox.org/',
       license='MIT',
       platforms='ALL',
-      long_description=_read('README'),
+      long_description=_read('README.rst'),
       test_suite='test.testall.suite',
 
       packages=[
@@ -40,13 +40,16 @@ setup(name='beets',
           'beetsplug.bpd',
       ],
       namespace_packages=['beetsplug'],
-      scripts=['beet'],
+      entry_points={
+          'console_scripts': [
+              'beet = beets.ui:main',
+          ],
+      },
 
       install_requires=[
           'mutagen',
           'python-musicbrainz2 >= 0.7.0',
           'munkres',
-          'eventlet >= 0.9.3',
       ],
 
       classifiers=[

@@ -56,10 +56,10 @@ class MBReleaseDictTest(unittest.TestCase):
     def _make_release(self, date_str='2009'):
         release = musicbrainz2.model.Release()
         release.title = 'ALBUM TITLE'
-        release.id = 'ALBUM ID'
+        release.id = 'domain/ALBUM ID'
         release.artist = musicbrainz2.model.Artist()
         release.artist.name = 'ARTIST NAME'
-        release.artist.id = 'ARTIST ID'
+        release.artist.id = 'domain/ARTIST ID'
 
         event = musicbrainz2.model.ReleaseEvent()
         if date_str is not None:
@@ -94,8 +94,8 @@ class MBReleaseDictTest(unittest.TestCase):
 
     def test_parse_tracks(self):
         release = self._make_release()
-        tracks = [self._make_track('TITLE ONE', 'ID ONE', 100.0 * 1000.0),
-                  self._make_track('TITLE TWO', 'ID TWO', 200.0 * 1000.0)]
+        tracks = [self._make_track('TITLE ONE', 'dom/ID ONE', 100.0 * 1000.0),
+                  self._make_track('TITLE TWO', 'dom/ID TWO', 200.0 * 1000.0)]
         d = mb.release_dict(release, tracks)
         t = d['tracks']
         self.assertEqual(len(t), 2)
@@ -114,7 +114,7 @@ class MBReleaseDictTest(unittest.TestCase):
     
     def test_no_durations(self):
         release = self._make_release()
-        tracks = [self._make_track('TITLE', 'ID', None)]
+        tracks = [self._make_track('TITLE', 'dom/ID', None)]
         d = mb.release_dict(release, tracks)
         self.assertFalse('length' in d['tracks'][0])
 
@@ -147,6 +147,25 @@ class ByIDTest(unittest.TestCase):
     def test_no_match_returns_none(self):
         a = mb.album_for_id('bogus-id')
         self.assertEqual(a, None)
+
+class SpecialCaseTest(unittest.TestCase):
+    def test_chkchkchk_by_query(self):
+        a = iter(mb.find_releases({
+            'artist': '!!!',
+            'album': '!!!',
+            'tracks': '7',
+        })).next()
+        self.assertEqual(a['artist'], '!!!')
+        self.assertEqual(a['album'], '!!!')
+    
+    def test_chkchkchk_by_keys(self):
+        a = iter(mb.get_releases(
+            artistName='!!!',
+            title='!!!',
+            trackCount=7,
+        )).next()
+        self.assertEqual(a['artist'], '!!!')
+        self.assertEqual(a['album'], '!!!')
 
 def suite():
     return unittest.TestLoader().loadTestsFromName(__name__)

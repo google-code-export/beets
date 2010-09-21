@@ -61,6 +61,32 @@ class EdgeTest(unittest.TestCase):
         self.assertEqual(f.disc, 4)
         self.assertEqual(f.disctotal, 5)
 
+_sc = beets.mediafile._safe_cast
+class InvalidValueToleranceTest(unittest.TestCase):
+    def test_packed_integer_with_extra_chars(self):
+        pack = beets.mediafile.Packed("06a", beets.mediafile.packing.SLASHED)
+        self.assertEqual(pack[0], 6)
+
+    def test_packed_integer_invalid(self):
+        pack = beets.mediafile.Packed("blah", beets.mediafile.packing.SLASHED)
+        self.assertEqual(pack[0], 0)
+
+    def test_packed_index_out_of_range(self):
+        pack = beets.mediafile.Packed("06", beets.mediafile.packing.SLASHED)
+        self.assertEqual(pack[1], 0)
+
+    def test_safe_cast_string_to_int(self):
+        self.assertEqual(_sc(int, 'something'), 0)
+
+    def test_safe_cast_int_string_to_int(self):
+        self.assertEqual(_sc(int, '20'), 20)
+
+    def test_safe_cast_string_to_bool(self):
+        self.assertEqual(_sc(bool, 'whatever'), False)
+
+    def test_safe_cast_intstring_to_bool(self):
+        self.assertEqual(_sc(bool, '5'), True)
+
 class SafetyTest(unittest.TestCase):
     def _exccheck(self, fn, exc):
         fn = os.path.join('rsrc', fn)
@@ -87,6 +113,15 @@ class SafetyTest(unittest.TestCase):
     def test_invalid_extension_raises_filetypeerror(self):
         self._exccheck('something.unknown', beets.mediafile.FileTypeError)
 
+class SideEffectsTest(unittest.TestCase):
+    def setUp(self):
+        self.empty = os.path.join('rsrc', 'empty.mp3')
+
+    def test_opening_tagless_file_leaves_untouched(self):
+        old_mtime = os.stat(self.empty).st_mtime
+        beets.mediafile.MediaFile(self.empty)
+        new_mtime = os.stat(self.empty).st_mtime
+        self.assertEqual(old_mtime, new_mtime)
 
 def suite():
     return unittest.TestLoader().loadTestsFromName(__name__)

@@ -21,6 +21,7 @@ from string import Template
 import logging
 import platform
 from beets.mediafile import MediaFile, UnreadableFileError, FileTypeError
+from beets import plugins
 
 MAX_FILENAME_LENGTH = 200
 
@@ -34,7 +35,9 @@ MAX_FILENAME_LENGTH = 200
 # - Does the field reflect an attribute of a MediaFile?
 ITEM_FIELDS = [
     ('id',          'integer primary key', False, False),
-    ('path',        'text', False, False),
+    ('path',        'blob', False, False),
+    ('album_id',    'int',  False, False),
+
     ('title',       'text', True,  True),
     ('artist',      'text', True,  True),
     ('album',       'text', True,  True),
@@ -55,21 +58,36 @@ ITEM_FIELDS = [
     ('mb_trackid',  'text', True,  True),
     ('mb_albumid',  'text', True,  True),
     ('mb_artistid', 'text', True,  True),
+
     ('length',      'real', False, True),
     ('bitrate',     'int',  False, True),
+    ('format',      'text', False, True),
 ]
 ITEM_KEYS_WRITABLE = [f[0] for f in ITEM_FIELDS if f[3] and f[2]]
 ITEM_KEYS_META     = [f[0] for f in ITEM_FIELDS if f[3]]
 ITEM_KEYS          = [f[0] for f in ITEM_FIELDS]
 
 # Database fields for the "albums" table.
+# The third entry in each tuple indicates whether the field reflects an
+# identically-named field in the items table.
 ALBUM_FIELDS = [
-    ('id',      'integer primary key'),
-    ('artist',  'text'),
-    ('album',   'text'),
-    ('artpath', 'text'),
+    ('id', 'integer primary key', False),
+    ('artpath', 'blob', False),
+
+    ('artist',      'text', True),
+    ('album',       'text', True),
+    ('genre',       'text', True),
+    ('year',        'int',  True),
+    ('month',       'int',  True),
+    ('day',         'int',  True),
+    ('tracktotal',  'int',  True),
+    ('disctotal',   'int',  True),
+    ('comp',        'bool', True),
+    ('mb_albumid',  'text', True),
+    ('mb_artistid', 'text', True),
 ]
 ALBUM_KEYS = [f[0] for f in ALBUM_FIELDS]
+ALBUM_KEYS_ITEM = [f[0] for f in ALBUM_FIELDS if f[2]]
 
 # Default search fields for various granularities.
 ARTIST_DEFAULT_FIELDS = ('artist',)
@@ -78,7 +96,6 @@ ITEM_DEFAULT_FIELDS = ALBUM_DEFAULT_FIELDS + ('title', 'comments')
 
 # Logger.
 log = logging.getLogger('beets')
-log.setLevel(logging.DEBUG)
 log.addHandler(logging.StreamHandler())
 
 
@@ -116,7 +133,8 @@ def _ancestry(path):
     return out
 
 def _mkdirall(path):
-    """Like mkdir -p, make directories for the entire ancestry of path.
+    """Make all the enclosing directories of path (like mkdir -p on the
+    parent).
     """
     for ancestor in _ancestry(path):
         if not os.path.isdir(ancestor):
@@ -142,19 +160,28 @@ def _components(path):
     
     return comps
 
-def _unicode_path(path):
-    """Ensures that a path string is in Unicode."""
-    if isinstance(path, unicode):
+def _bytestring_path(path):
+    """Given a path, which is either a str or a unicode, returns a str
+    path (ensuring that we never deal with Unicode pathnames).
+    """
+    # Pass through bytestrings.
+    if isinstance(path, str):
         return path
-    return path.decode(sys.getfilesystemencoding())
+
+    # Try to encode with default encodings, but fall back to UTF8.
+    encoding = sys.getfilesystemencoding() or sys.getdefaultencoding()
+    try:
+        return path.encode(encoding)
+    except UnicodeError:
+        return path.encode('utf8')
 
 # Note: POSIX actually supports \ and : -- I just think they're
-# a pain.
+# a pain. And ? has caused problems for some.
 CHAR_REPLACE = [
-    (re.compile(r'[\\/]|^\.'), u'_'),
-    (re.compile(r':'), u'-'),
+    (re.compile(r'[\\/\?]|^\.'), '_'),
+    (re.compile(r':'), '-'),
 ]
-CHAR_REPLACE_WINDOWS = re.compile('["\*\?<>\|]|^\.|\.$'), u'_u'
+CHAR_REPLACE_WINDOWS = re.compile('["\*<>\|]|^\.|\.$'), '_'
 def _sanitize_path(path, plat=None):
     """Takes a path and makes sure that it is legal for the specified
     platform (as returned by platform.system()). Returns a new path.
@@ -189,8 +216,11 @@ class Item(object):
     def from_path(cls, path):
         """Creates a new item from the media file at the specified path.
         """
-        i = cls({})
-        i.read(_unicode_path(path))
+        # Initiate with values that aren't read from files.
+        i = cls({
+            'album_id': None,
+        })
+        i.read(path)
         return i
 
     def _fill_record(self, values):
@@ -199,7 +229,7 @@ class Item(object):
             try:
                 setattr(self, key, values[key])
             except KeyError:
-                pass # don't use values that aren't present
+                setattr(self, key, None)
 
     def _clear_dirty(self):
         self.dirty = {}
@@ -229,6 +259,13 @@ class Item(object):
         
         Otherwise, performs an ordinary setattr.
         """
+        # Encode unicode paths and read buffers.
+        if key == 'path':
+            if isinstance(value, unicode):
+                value = _bytestring_path(value)
+            elif isinstance(value, buffer):
+                value = str(value)
+
         if key in ITEM_KEYS:
             if (not (key in self.record)) or (self.record[key] != value):
                 # don't dirty if value unchanged
@@ -282,7 +319,7 @@ class Item(object):
         
         # Create necessary ancestry for the move.
         _mkdirall(dest)
-
+        
         if copy:
             shutil.copy(self.path, dest)
         else:
@@ -350,7 +387,10 @@ class FieldQuery(Query):
 class MatchQuery(FieldQuery):
     """A query that looks for exact matches in an item field."""
     def clause(self):
-        return self.field + " = ?", [self.pattern]
+        pattern = self.pattern
+        if self.field == 'path' and isinstance(pattern, str):
+            pattern = buffer(pattern)
+        return self.field + " = ?", [pattern]
 
     def match(self, item):
         return self.pattern == getattr(item, self.field)
@@ -496,16 +536,7 @@ class AndQuery(MutableCollectionQuery):
 
     def match(self, item):
         return all([q.match(item) for q in self.subqueries])
-def assert_matched(self, result_iterator, title):
-    self.assertEqual(result_iterator.next().title, title)
-def assert_done(self, result_iterator):
-    self.assertRaises(StopIteration, result_iterator.next)
-def assert_matched_all(self, result_iterator):
-    self.assert_matched(result_iterator, 'Littlest Things')
-    self.assert_matched(result_iterator, 'Lovers Who Uncover')
-    self.assert_matched(result_iterator, 'Boracay')
-    self.assert_matched(result_iterator, 'Take Pills')
-    self.assert_done(result_iterator)
+
 class TrueQuery(Query):
     """A query that always matches."""
     def clause(self):
@@ -530,30 +561,6 @@ class ResultIterator(object):
             self.cursor.close()
             raise
         return Item(row)
-
-
-# Album information proxy objects.
-
-class AlbumInfo(object):
-    """Provides access to information about albums stored in a library.
-    """
-    def __init__(self, library, ident):
-        self._library = library
-        self._ident = ident
-
-    def __getattr__(self, key):
-        """Get an album field's value."""
-        if key in ALBUM_KEYS:
-            return self._library._album_get(self._ident, key)
-        else:
-            return getattr(self, key)
-
-    def __setattr__(self, key, value):
-        """Set an album field."""
-        if key in ALBUM_KEYS:
-            self._library._album_set(self._ident, key, value)
-        else:
-            super(AlbumInfo, self).__setattr__(key, value)
 
 
 # An abstract library.
@@ -645,16 +652,27 @@ class BaseLibrary(object):
         return sorted(out)
 
     def albums(self, artist=None, query=None):
-        """Returns a sorted list of (artist, album) pairs, possibly
-        filtered by an artist name or an arbitrary query. Unqualified
-        query string terms only match fields that apply at an album
+        """Returns a sorted list of BaseAlbum objects, possibly filtered
+        by an artist name or an arbitrary query. Unqualified query
+        string terms only match fields that apply at an album
         granularity: artist, album, and genre.
         """
-        out = set()
+        # Gather the unique album/artist names and associated example
+        # Items.
+        specimens = set()
         for item in self.get(query, ALBUM_DEFAULT_FIELDS):
-            if artist is None or item.artist == artist:
-                out.add((item.artist, item.album))
-        return sorted(out)
+            if (artist is None or item.artist == artist):
+                key = (item.artist, item.album)
+                if key not in specimens:
+                    specimens[key] = item
+
+        # Build album objects.
+        for k in sorted(specimens.keys()):
+            item = specimens[k]
+            record = {}
+            for key in ALBUM_KEYS_ITEM:
+                record[key] = getattr(item, key)
+            yield BaseAlbum(self, record)
 
     def items(self, artist=None, album=None, title=None, query=None):
         """Returns a sequence of the items matching the given artist,
@@ -678,26 +696,50 @@ class BaseLibrary(object):
                    cmp(a.track, b.track)
         return sorted(out, compare)
 
+class BaseAlbum(object):
+    """Represents an album in the library, which in turn consists of a
+    collection of items in the library.
 
-    # Album information.
-    # Provides access to information about items at an album
-    # granularity. AlbumInfo proxy objects are used to access fields;
-    # they invoke _album_get and _album_set.
+    This base version just reflects the metadata of the album's items
+    and therefore isn't particularly useful. The items are referenced
+    by the record's album and artist fields. Implementations can add
+    album-level metadata or use distinct backing stores.
+    """
+    def __init__(self, library, record):
+        self._library = library
+        self._record = record
 
-    def albuminfo(self, item):
-        """Given an artist and album name, return an AlbumInfo proxy
-        object for the given item's album.
+    def __getattr__(self, key):
+        """Get the value for an album attribute."""
+        if key in self._record:
+            return self._record[key]
+        else:
+            raise AttributeError('no such field %s' % key)
+
+    def __setattr__(self, key, value):
+        """Set the value of an album attribute, modifying each of the
+        album's items.
         """
-        return AlbumInfo(self, (item.artist, item.album))
+        if key in self._record:
+            # Reflect change in this object.
+            self._record[key] = value
+            # Modify items.
+            if key in ALBUM_KEYS_ITEM:
+                items = self._library.items(artist=self.artist,
+                                            album=self.album)
+                for item in items:
+                    setattr(item, key, value)
+                self._library.store(item)
+        else:
+            object.__setattr__(self, key, value)
 
-    def _album_get(self, ident, key):
-        """For the album specified, returns the value associated with
-        the key."""
-        raise NotImplementedError()
-
-    def _album_set(self, ident, key, value):
-        """Sets the indicated album's value for key."""
-        raise NotImplementedError()
+    def load(self):
+        """Refresh this album's cached metadata from the library.
+        """
+        items = self._library.items(artist=self.artist, album=self.album)
+        item = iter(items).next()
+        for key in ALBUM_KEYS_ITEM:
+            self._record[key] = getattr(item, key)
 
 
 # Concrete DB-backed library.
@@ -710,10 +752,10 @@ class Library(BaseLibrary):
                        art_filename='cover',
                        item_fields=ITEM_FIELDS,
                        album_fields=ALBUM_FIELDS):
-        self.path = path
-        self.directory = directory
+        self.path = _bytestring_path(path)
+        self.directory = _bytestring_path(directory)
         self.path_format = path_format
-        self.art_filename = art_filename
+        self.art_filename = _bytestring_path(art_filename)
         
         self.conn = sqlite3.connect(self.path)
         self.conn.row_factory = sqlite3.Row
@@ -762,15 +804,24 @@ class Library(BaseLibrary):
         """Returns the path in the library directory designated for item
         item (i.e., where the file ought to be).
         """
-        libpath = self.directory
         subpath_tmpl = Template(self.path_format)
+
+        # Get the item's Album if it has one.
+        album = self.get_album(item)
         
         # Build the mapping for substitution in the path template,
         # beginning with the values from the database.
         mapping = {}
         for key in ITEM_KEYS_META:
-            value = getattr(item, key)
-            # sanitize the value for inclusion in a path:
+            # Get the values from either the item or its album.
+            if key in ALBUM_KEYS_ITEM and album is not None:
+                # From album.
+                value = getattr(album, key)
+            else:
+                # From Item.
+                value = getattr(item, key)
+
+            # Sanitize the value for inclusion in a path:
             # replace / and leading . with _
             if isinstance(value, basestring):
                 value = value.replace(os.sep, '_')
@@ -784,6 +835,11 @@ class Library(BaseLibrary):
         # Perform substitution.
         subpath = subpath_tmpl.substitute(mapping)
         
+        # Encode for the filesystem, dropping unencodable characters.
+        if isinstance(subpath, unicode):
+            encoding = sys.getfilesystemencoding() or sys.getdefaultencoding()
+            subpath = subpath.encode(encoding, 'replace')
+        
         # Truncate components and remove forbidden characters.
         subpath = _sanitize_path(subpath)
         
@@ -791,18 +847,8 @@ class Library(BaseLibrary):
         _, extension = os.path.splitext(item.path)
         subpath += extension
         
-        return _normpath(os.path.join(libpath, subpath))   
+        return _normpath(os.path.join(self.directory, subpath))   
 
-    def art_path(self, item, image):
-        """Returns a path to the destination for the album art image
-        for the item's album. `image` is the path of the image that
-        will be moved there (used for its extension).
-        """
-        item_dir = os.path.dirname(item.path)
-        _, ext = os.path.splitext(image)
-        dest = os.path.join(item_dir, self.art_filename + ext)
-        return dest
-    
     
     # Main interface.
 
@@ -818,7 +864,10 @@ class Library(BaseLibrary):
         subvars = []
         for key in ITEM_KEYS:
             if key != 'id':
-                subvars.append(getattr(item, key))
+                value = getattr(item, key)
+                if key == 'path' and isinstance(value, str):
+                    value = buffer(value)
+                subvars.append(value)
         
         # issue query
         c = self.conn.cursor()
@@ -835,9 +884,11 @@ class Library(BaseLibrary):
         return self._get_query(query).execute(self)
     
     def save(self):
-        """Writes the library to disk (completing a sqlite transaction).
+        """Writes the library to disk (completing an sqlite
+        transaction).
         """
         self.conn.commit()
+        plugins.send('save', lib=self)
 
     def load(self, item, load_id=None):
         if load_id is None:
@@ -856,13 +907,15 @@ class Library(BaseLibrary):
         # build assignments for query
         assignments = ''
         subvars = []
-        album_changed = False
         for key in ITEM_KEYS:
             if (key != 'id') and (item.dirty[key] or store_all):
                 assignments += key + '=?,'
-                subvars.append(getattr(item, key))
-                if key in ('artist', 'album'):
-                    album_changed = True
+                value = getattr(item, key)
+                # Wrap path strings in buffers so they get stored
+                # "in the raw".
+                if key == 'path' and isinstance(value, str):
+                    value = buffer(value)
+                subvars.append(value)
         
         if not assignments:
             # nothing to store (i.e., nothing was dirty)
@@ -870,58 +923,18 @@ class Library(BaseLibrary):
         
         assignments = assignments[:-1] # knock off last ,
 
-        # Get old artist and album for cleanup.
-        old_artist, old_album = self.conn.execute(
-            'SELECT artist, album FROM items WHERE id=?',
-            (item.id,)
-        ).fetchone()
-
         # finish the query
         query = 'UPDATE items SET ' + assignments + ' WHERE id=?'
-        subvars.append(item.id)
+        subvars.append(store_id)
 
         self.conn.execute(query, subvars)
         item._clear_dirty()
 
-        # Clean up album.
-        album_row = self._cleanup_album(old_artist, old_album)
-
     def remove(self, item, delete=False):
-        # Get album and artist so we can clean up the album entry.
-        artist, album = self.conn.execute(
-            'SELECT artist, album FROM items WHERE id=?',
-            (item.id,)
-        ).fetchone()
-
         self.conn.execute('DELETE FROM items WHERE id=?', (item.id,))
         if delete:
             os.unlink(item.path)
 
-        # Clean up album.
-        album_row = self._cleanup_album(artist, album)
-        if delete and album_row and album_row['artpath']:
-            # When deleting items, delete their art as well.
-            os.unlink(album_row['artpath'])
-
-    def _cleanup_album(self, artist, album):
-        """If there are no items with the album specified, then removes
-        the corresponding album entry and returns it. Otherwise, returns
-        None.
-        """
-        c = self.conn.execute(
-            'SELECT id FROM items WHERE artist=? AND album=?',
-            (artist, album)
-        )
-        if c.fetchone() is None:
-            album_row = self.conn.execute(
-                'SELECT * FROM albums WHERE artist=? AND album=?',
-                (artist, album)
-            ).fetchone()
-            self.conn.execute(
-                'DELETE FROM albums WHERE artist=? AND album=?',
-                (artist, album)
-            )
-            return album_row
 
     # Browsing.
 
@@ -940,11 +953,11 @@ class Library(BaseLibrary):
             # "Add" the artist to the query.
             query = AndQuery((query, MatchQuery('artist', artist)))
         where, subvals = query.clause()
-        sql = "SELECT DISTINCT artist, album FROM items " + \
+        sql = "SELECT * FROM albums " + \
               "WHERE " + where + \
               " ORDER BY artist, album"
         c = self.conn.execute(sql, subvals)
-        return [(res[0], res[1]) for res in c.fetchall()]
+        return [Album(self, dict(res)) for res in c.fetchall()]
 
     def items(self, artist=None, album=None, title=None, query=None):
         queries = [self._get_query(query, ITEM_DEFAULT_FIELDS)]
@@ -962,36 +975,207 @@ class Library(BaseLibrary):
               " ORDER BY artist, album, disc, track"
         c = self.conn.execute(sql, subvals)
         return ResultIterator(c, self)
-    
-    
-    # Album information.
 
-    def albuminfo(self, item):
-        """Get an album info proxy object given either an item or an
-        album id.
+
+    # Convenience accessors.
+
+    def get_item(self, id):
+        """Fetch an Item by its ID. Returns None if no match is found.
         """
-        if isinstance(item, int):
-            album_id = item
+        c = self.conn.execute("SELECT * FROM items WHERE id=?", (id,))
+        it = ResultIterator(c, self)
+        try:
+            return it.next()
+        except StopIteration:
+            return None
+    
+    def get_album(self, item_or_id):
+        """Given an album ID or an item associated with an album,
+        return an Album object for the album. If no such album exists,
+        returns None.
+        """
+        if isinstance(item_or_id, int):
+            album_id = item_or_id
         else:
-            # Lazily create a row in the albums table if one doesn't
-            # exist.
-            sql = 'SELECT id FROM albums WHERE artist=? AND album=?'
-            c = self.conn.execute(sql, (item.artist, item.album))
-            row = c.fetchone()
-            if row:
-                album_id = row[0]
+            album_id = item_or_id.album_id
+        if album_id is None:
+            return None
+
+        record = self.conn.execute(
+            'SELECT * FROM albums WHERE id=?',
+            (album_id,)
+        ).fetchone()
+        if record:
+            return Album(self, dict(record))
+
+    def add_album(self, items):
+        """Create a new album in the database with metadata derived
+        from its items. The items are added to the database if they
+        don't yet have an ID. Returns an Album object.
+        """
+        # Set the metadata from the first item.
+        #fixme: check for consensus?
+        sql = 'INSERT INTO albums (%s) VALUES (%s)' % \
+              (', '.join(ALBUM_KEYS_ITEM),
+               ', '.join(['?'] * len(ALBUM_KEYS_ITEM)))
+        subvals = [getattr(items[0], key) for key in ALBUM_KEYS_ITEM]
+        c = self.conn.execute(sql, subvals)
+        album_id = c.lastrowid
+
+        # Construct the new Album object.
+        record = {}
+        for key in ALBUM_KEYS:
+            if key in ALBUM_KEYS_ITEM:
+                record[key] = getattr(items[0], key)
             else:
-                sql = 'INSERT INTO albums (artist, album) VALUES (?, ?)'
-                c = self.conn.execute(sql, (item.artist, item.album))
-                album_id = c.lastrowid
-        return AlbumInfo(self, album_id)
+                # Non-item fields default to None.
+                record[key] = None
+        record['id'] = album_id
+        album = Album(self, record)
 
-    def _album_get(self, album_id, key):
-        sql = 'SELECT %s FROM albums WHERE id=?' % key
-        c = self.conn.execute(sql, (album_id,))
-        return c.fetchone()[0]
+        # Add the items to the library.
+        for item in items:
+            item.album_id = album_id
+            if item.id is None:
+                self.add(item)
+            else:
+                self.store(item)
 
-    def _album_set(self, album_id, key, value):
-        sql = 'UPDATE albums SET %s=? WHERE id=?' % key
-        self.conn.execute(sql, (value, album_id))
+        return album
 
+class Album(BaseAlbum):
+    """Provides access to information about albums stored in a
+    library. Reflects the library's "albums" table, including album
+    art.
+    """
+    def __init__(self, lib, record):
+        # Decode Unicode paths in database.
+        if 'artpath' in record and isinstance(record['artpath'], unicode):
+            record['artpath'] = _bytestring_path(record['artpath'])
+        super(Album, self).__init__(lib, record)
+
+    def __setattr__(self, key, value):
+        """Set the value of an album attribute."""
+        if key == 'id':
+            raise AttributeError("can't modify album id")
+
+        elif key in ALBUM_KEYS:
+            # Make sure paths are bytestrings.
+            if key == 'artpath' and isinstance(value, unicode):
+                value = _bytestring_path(value)
+
+            # Reflect change in this object.
+            self._record[key] = value
+
+            # Store art path as a buffer.
+            if key == 'artpath' and isinstance(value, str):
+                value = buffer(value)
+
+            # Change album table.
+            sql = 'UPDATE albums SET %s=? WHERE id=?' % key
+            self._library.conn.execute(sql, (value, self.id))
+
+            # Possibly make modification on items as well.
+            if key in ALBUM_KEYS_ITEM:
+                for item in self.items():
+                    setattr(item, key, value)
+                    self._library.store(item)
+
+        else:
+            object.__setattr__(self, key, value)
+
+    def __getattr__(self, key):
+        value = super(Album, self).__getattr__(key)
+
+        # Unwrap art path from buffer object.
+        if key == 'artpath' and isinstance(value, buffer):
+            value = str(value)
+
+        return value
+
+    def items(self):
+        """Returns an iterable over the items associated with this
+        album.
+        """
+        c = self._library.conn.execute(
+            'SELECT * FROM items WHERE album_id=?',
+            (self.id,)
+        )
+        return ResultIterator(c, self._library)
+
+    def remove(self, delete=False):
+        """Removes this album and all its associated items from the
+        library. If delete, then the items' files are also deleted
+        from disk, along with any album art.
+        """
+        # Remove items.
+        for item in self.items():
+            self._library.remove(item, delete)
+        
+        # Delete art.
+        if delete:
+            artpath = self.artpath
+            if artpath:
+                os.unlink(artpath)
+        
+        # Remove album.
+        self._library.conn.execute(
+            'DELETE FROM albums WHERE id=?',
+            (self.id,)
+        )
+
+    def move(self, copy=False):
+        """Moves (or copies) all items to their destination. Any
+        album art moves along with them.
+        """
+        # Move items.
+        items = list(self.items())
+        for item in items:
+            item.move(self._library, copy)
+        newdir = os.path.dirname(items[0].path)
+
+        # Move art.
+        old_art = self.artpath
+        if old_art:
+            new_art = self.art_destination(old_art, newdir)
+            if new_art != old_art:
+                if copy:
+                    shutil.copy(old_art, new_art)
+                else:
+                    shutil.move(old_art, new_art)
+                self.artpath = new_art
+
+        # Store new item paths. We do this at the end to avoid
+        # locking the database for too long while files are copied.
+        for item in items:
+            self._library.store(item)
+
+    def art_destination(self, image, item_dir=None):
+        """Returns a path to the destination for the album art image
+        for the album. `image` is the path of the image that will be
+        moved there (used for its extension).
+
+        The path construction uses the existing path of the album's
+        items, so the album must contain at least one item or
+        item_dir must be provided.
+        """
+        image = _bytestring_path(image)
+        if item_dir is None:
+            item = self.items().next()
+            item_dir = os.path.dirname(item.path)
+        _, ext = os.path.splitext(image)
+        dest = os.path.join(item_dir, self._library.art_filename + ext)
+        return dest
+    
+    def set_art(self, path):
+        """Sets the album's cover art to the image at the given path.
+        The image is copied into place, replacing any existing art.
+        """
+        path = _bytestring_path(path)
+        oldart = self.artpath
+        artdest = self.art_destination(path)
+        if oldart == artdest:
+            os.unlink(oldart)
+
+        shutil.copy(path, artdest)
+        self.artpath = artdest

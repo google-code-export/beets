@@ -19,7 +19,6 @@ import unittest
 import sys
 import os
 import sqlite3
-import shutil
 sys.path.append('..')
 import beets.library
 
@@ -47,9 +46,11 @@ def item(): return beets.library.Item({
     'path':        'somepath',
     'length':      60.0,
     'bitrate':     128000,
+    'format':      'FLAC',
     'mb_trackid':  'someID-1',
     'mb_albumid':  'someID-2',
     'mb_artistid': 'someID-3',
+    'album_id':    None,
 })
 np = beets.library._normpath
 
@@ -247,61 +248,19 @@ class DestinationTest(unittest.TestCase):
     def test_sanitize_replaces_colon_with_dash(self):
         p = beets.library._sanitize_path(u':', 'Darwin')
         self.assertEqual(p, u'-')
+    
+    def test_path_with_format(self):
+        self.lib.path_format = '$artist/$album ($format)'
+        p = self.lib.destination(self.i)
+        self.assert_('(FLAC)' in p)
 
-class ArtDestinationTest(unittest.TestCase):
-    def setUp(self):
-        self.lib = beets.library.Library(':memory:')
-        self.i = item()
-        self.i.path = '/some/music/file.mp3'
-        self.lib.art_filename = 'artimage'
-        
-    def test_art_filename_respects_setting(self):
-        art = self.lib.art_path(self.i, 'something.jpg')
-        self.assert_('/artimage.jpg' in art)
-        
-    def test_art_path_in_item_dir(self):
-        art = self.lib.art_path(self.i, 'something.jpg')
-        track = self.i.path
-        self.assertEqual(os.path.dirname(art), os.path.dirname(track))
-
-class ArtFileTest(unittest.TestCase):
-    def _touch(self, path):
-        # Create file if it doesn't exist.
-        open(path, 'a').close()
-
-    def setUp(self):
-        # Make library and item.
-        self.lib = beets.library.Library(':memory:')
-        self.libdir = os.path.join('rsrc', 'testlibdir')
-        self.lib.directory = self.libdir
-        self.i = item()
-        self.i.path = self.lib.destination(self.i)
-        # Make a file.
-        beets.library._mkdirall(self.i.path)
-        self._touch(self.i.path)
-        self.lib.add(self.i)
-        # Make an art file too.
-        self.art = self.lib.art_path(self.i, 'something.jpg')
-        self._touch(self.art)
-        self.lib.albuminfo(self.i).artpath = self.art
-    def tearDown(self):
-        if os.path.exists(self.libdir):
-            shutil.rmtree(self.libdir)
-
-    def test_art_deleted_when_items_deleted(self):
-        self.assertTrue(os.path.exists(self.art))
-        self.lib.remove(self.i, True)
-        self.assertFalse(os.path.exists(self.art))
-
-    def test_art_moves_with_last_album(self):
-        self.assertTrue(os.path.exists(self.art))
-        oldpath = self.i.path
-        self.i.artist = 'newArtist'
-        self.i.move(self.lib)
-        self.assertNotEqual(self.i.path, oldpath)
-        self.assertFalse(os.path.exists(self.art))
-        newart = self.lib.art_path(self.i)
-        self.assertTrue(os.path.exists(newart))
+    def test_heterogeneous_album_gets_single_directory(self):
+        i1, i2 = item(), item()
+        self.lib.add_album([i1, i2])
+        i1.year, i2.year = 2009, 2010
+        self.lib.path_format = '$album ($year)/$track $title'
+        dest1, dest2 = self.lib.destination(i1), self.lib.destination(i2)
+        self.assertEqual(os.path.dirname(dest1), os.path.dirname(dest2))
 
 class MigrationTest(unittest.TestCase):
     """Tests the ability to change the database schema between
@@ -381,82 +340,167 @@ class AlbumInfoTest(unittest.TestCase):
     def setUp(self):
         self.lib = beets.library.Library(':memory:')
         self.i = item()
-        self.lib.add(self.i)
+        self.lib.add_album((self.i,))
 
     def test_albuminfo_reflects_metadata(self):
-        ai = self.lib.albuminfo(self.i)
+        ai = self.lib.get_album(self.i)
         self.assertEqual(ai.artist, self.i.artist)
         self.assertEqual(ai.album, self.i.album)
+        self.assertEqual(ai.year, self.i.year)
 
     def test_albuminfo_stores_art(self):
-        ai = self.lib.albuminfo(self.i)
+        ai = self.lib.get_album(self.i)
         ai.artpath = '/my/great/art'
-        new_ai = self.lib.albuminfo(self.i)
+        new_ai = self.lib.get_album(self.i)
         self.assertEqual(new_ai.artpath, '/my/great/art')
-    
-    def test_albuminfo_removed_when_last_item_removed(self):
-        self.lib.albuminfo(self.i)
-        c = self.lib.conn.cursor()
-        c.execute('select * from albums where album=?', (self.i.album,))
-        self.assertNotEqual(c.fetchone(), None)
-        
-        self.lib.remove(self.i)
-        
-        c = self.lib.conn.cursor()
-        c.execute('select * from albums where album=?', (self.i.album,))
-        self.assertEqual(c.fetchone(), None)
-    
-    def test_albuminfo_changes_when_item_field_changes(self):
-        self.lib.albuminfo(self.i)
-        self.i.album = 'anotherAlbum'
-        self.lib.store(self.i)
-        
-        ai = self.lib.albuminfo(self.i)
-        self.assertEqual(ai.album, 'anotherAlbum')
-    
-    def test_old_albuminfo_removed_when_last_item_changes(self):
-        oldalbum = self.i.album
-        self.lib.albuminfo(self.i)
-        self.i.album = 'anotherAlbum'
-        self.lib.store(self.i)
-        
-        c = self.lib.conn.cursor()
-        c.execute('select * from albums where album=?', (oldalbum,))
-        self.assertEqual(c.fetchone(), None)
-    
-    def test_splitting_album_leaves_albuminfo_for_both(self):
-        i2 = item()
-        self.lib.add(i2)
-        self.lib.albuminfo(self.i)
-        self.lib.albuminfo(i2)
-        
-        i2.artist = 'anotherArtist'
-        self.lib.store(i2)
-        
-        ai = self.lib.albuminfo(self.i)
-        self.assertEqual(ai.artist, self.i.artist)
-        ai = self.lib.albuminfo(i2)
-        self.assertEqual(ai.artist, 'anotherArtist')
     
     def test_albuminfo_for_two_items_doesnt_duplicate_row(self):
         i2 = item()
         self.lib.add(i2)
-        self.lib.albuminfo(self.i)
-        self.lib.albuminfo(i2)
+        self.lib.get_album(self.i)
+        self.lib.get_album(i2)
         
         c = self.lib.conn.cursor()
         c.execute('select * from albums where album=?', (self.i.album,))
         # Cursor should only return one row.
         self.assertNotEqual(c.fetchone(), None)
         self.assertEqual(c.fetchone(), None)
-    
-    def test_albuminfo_by_albumid(self):
-        ai = self.lib.albuminfo(self.i)
-        ai = self.lib.albuminfo(ai.id)
-        self.assertEqual(ai.artist, self.i.artist)
+
+    def test_individual_tracks_have_no_albuminfo(self):
+        i2 = item()
+        i2.album = 'aTotallyDifferentAlbum'
+        self.lib.add(i2)
+        ai = self.lib.get_album(i2)
+        self.assertEqual(ai, None)
+
+    def test_get_album_by_id(self):
+        ai = self.lib.get_album(self.i)
+        ai = self.lib.get_album(self.i.id)
+        self.assertNotEqual(ai, None)
+
+    def test_album_items_consistent(self):
+        ai = self.lib.get_album(self.i)
+        for item in ai.items():
+            if item.id == self.i.id:
+                break
+        else:
+            self.fail("item not found")
+
+    def test_albuminfo_changes_affect_items(self):
+        ai = self.lib.get_album(self.i)
+        ai.album = 'myNewAlbum'
+        i = self.lib.items().next()
+        self.assertEqual(i.album, 'myNewAlbum')
+
+    def test_albuminfo_remove_removes_items(self):
+        item_id = self.i.id
+        self.lib.get_album(self.i).remove()
+        c = self.lib.conn.execute('SELECT id FROM items WHERE id=?', (item_id,))
+        self.assertEqual(c.fetchone(), None)
+
+class ArtDestinationTest(unittest.TestCase):
+    def setUp(self):
+        self.lib = beets.library.Library(':memory:')
+        self.i = item()
+        self.i.path = self.lib.destination(self.i)
+        self.lib.art_filename = 'artimage'
+        self.ai = self.lib.add_album((self.i,))
+        
+    def test_art_filename_respects_setting(self):
+        art = self.ai.art_destination('something.jpg')
+        self.assert_('/artimage.jpg' in art)
+        
+    def test_art_path_in_item_dir(self):
+        art = self.ai.art_destination('something.jpg')
+        track = self.lib.destination(self.i)
+        self.assertEqual(os.path.dirname(art), os.path.dirname(track))
+
+class PathStringTest(unittest.TestCase):
+    def setUp(self):
+        self.lib = beets.library.Library(':memory:')
+        self.i = item()
+        self.lib.add(self.i)
+
+    def test_item_path_is_bytestring(self):
+        self.assert_(isinstance(self.i.path, str))
+
+    def test_fetched_item_path_is_bytestring(self):
+        i = list(self.lib.items())[0]
+        self.assert_(isinstance(i.path, str))
+
+    def test_unicode_path_becomes_bytestring(self):
+        self.i.path = u'unicodepath'
+        self.assert_(isinstance(self.i.path, str))
+
+    def test_unicode_in_database_becomes_bytestring(self):
+        self.lib.conn.execute("""
+        update items set path=? where id=?
+        """, (self.i.id, u'somepath'))
+        i = list(self.lib.items())[0]
+        self.assert_(isinstance(i.path, str))
+
+    def test_special_chars_preserved_in_database(self):
+        path = 'b\xe1r'
+        self.i.path = path
+        self.lib.store(self.i)
+        i = list(self.lib.items())[0]
+        self.assertEqual(i.path, path)
+
+    def test_special_char_path_added_to_database(self):
+        self.lib.remove(self.i)
+        path = 'b\xe1r'
+        i = item()
+        i.path = path
+        self.lib.add(i)
+        i = list(self.lib.items())[0]
+        self.assertEqual(i.path, path)
+
+    def test_destination_returns_bytestring(self):
+        self.i.artist = u'b\xe1r'
+        dest = self.lib.destination(self.i)
+        self.assert_(isinstance(dest, str))
+
+    def test_art_destination_returns_bytestring(self):
+        self.i.artist = u'b\xe1r'
+        alb = self.lib.add_album([self.i])
+        dest = alb.art_destination(u'image.jpg')
+        self.assert_(isinstance(dest, str))
+
+    def test_artpath_stores_special_chars(self):
+        path = 'b\xe1r'
+        alb = self.lib.add_album([self.i])
+        alb.artpath = path
+        alb = self.lib.get_album(self.i)
+        self.assertEqual(path, alb.artpath)
+
+    def test_sanitize_path_with_special_chars(self):
+        path = 'b\xe1r?'
+        new_path = beets.library._sanitize_path(path)
+        self.assert_(new_path.startswith('b\xe1r'))
+
+    def test_sanitize_path_returns_bytestring(self):
+        path = 'b\xe1r?'
+        new_path = beets.library._sanitize_path(path)
+        self.assert_(isinstance(new_path, str))
+
+    def test_unicode_artpath_becomes_bytestring(self):
+        alb = self.lib.add_album([self.i])
+        alb.artpath = u'somep\xe1th'
+        self.assert_(isinstance(alb.artpath, str))
+
+    def test_unicode_artpath_in_database_decoded(self):
+        alb = self.lib.add_album([self.i])
+        self.lib.conn.execute(
+            "update albums set artpath=? where id=?",
+            (u'somep\xe1th', alb.id)
+        )
+        alb = self.lib.get_album(alb.id)
+        self.assert_(isinstance(alb.artpath, str))
+
 
 def suite():
     return unittest.TestLoader().loadTestsFromName(__name__)
 
 if __name__ == '__main__':
     unittest.main(defaultTest='suite')
+

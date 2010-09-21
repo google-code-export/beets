@@ -15,10 +15,10 @@
 """This module provides the default commands for beets' command-line
 interface.
 """
-
+from __future__ import with_statement # Python 2.5
 import os
 import logging
-import shutil
+import pickle
 
 from beets import ui
 from beets.ui import print_
@@ -26,7 +26,8 @@ from beets import autotag
 from beets import library
 from beets.mediafile import UnreadableFileError, FileTypeError
 import beets.autotag.art
-autotag.art = beets.autotag.art
+from beets.ui import pipeline
+from beets import plugins
 
 # Global logger.
 log = logging.getLogger('beets')
@@ -42,36 +43,74 @@ DEFAULT_IMPORT_COPY  = True
 DEFAULT_IMPORT_WRITE = True
 DEFAULT_IMPORT_AUTOT = True
 DEFAULT_IMPORT_ART   = True
+DEFAULT_THREADED     = True
+DEFAULT_COLOR        = True
 
-def show_change(cur_artist, cur_album, items, info, dist):
+class ImportAbort(Exception):
+    """Raised when the user aborts the tagging operation.
+    """
+    pass
+
+# Autotagger utilities and support.
+
+def dist_string(dist, color):
+    """Formats a distance (a float) as a string. The string is
+    colorized if color is True.
+    """
+    out = str(dist)
+    if color:
+        if dist <= autotag.STRONG_REC_THRESH:
+            out = ui.colorize('green', out)
+        elif dist <= autotag.MEDIUM_REC_THRESH:
+            out = ui.colorize('yellow', out)
+        else:
+            out = ui.colorize('red', out)
+    return out
+
+def show_change(cur_artist, cur_album, items, info, dist, color=True):
     """Print out a representation of the changes that will be made if
     tags are changed from (cur_artist, cur_album, items) to info with
     distance dist.
     """
     if cur_artist != info['artist'] or cur_album != info['album']:
+        artist_l, artist_r = cur_artist or '', info['artist']
+        album_l,  album_r  = cur_album  or '', info['album']
+        if color:
+            artist_l, artist_r = ui.colordiff(artist_l, artist_r)
+            album_l, album_r   = ui.colordiff(album_l, album_r)
         print_("Correcting tags from:")
-        print_('     %s - %s' % (cur_artist or '', cur_album or ''))
+        print_('     %s - %s' % (artist_l, album_l))
         print_("To:")
-        print_('     %s - %s' % (info['artist'], info['album']))
+        print_('     %s - %s' % (artist_r, album_r))
     else:
         print_("Tagging: %s - %s" % (info['artist'], info['album']))
-    print_('(Distance: %f)' % dist)
+    print_('(Distance: %s)' % dist_string(dist, color))
     for i, (item, track_data) in enumerate(zip(items, info['tracks'])):
-        cur_track = item.track
-        new_track = i+1
-        if item.title != track_data['title'] and cur_track != new_track:
-            print_(" * %s (%i) -> %s (%i)" % (
-                item.title, cur_track, track_data['title'], new_track
+        cur_track = str(item.track)
+        new_track = str(i+1)
+        cur_title = item.title
+        new_title = track_data['title']
+        
+        # Possibly colorize changes.
+        if color:
+            cur_title, new_title = ui.colordiff(cur_title, new_title)
+            if cur_track != new_track:
+                cur_track = ui.colorize('red', cur_track)
+                new_track = ui.colorize('red', new_track)
+        
+        if cur_title != new_title and cur_track != new_track:
+            print_(" * %s (%s) -> %s (%s)" % (
+                cur_title, cur_track, new_title, new_track
             ))
-        elif item.title != track_data['title']:
-            print_(" * %s -> %s" % (item.title, track_data['title']))
+        elif cur_title != new_title:
+            print_(" * %s -> %s" % (cur_title, new_title))
         elif cur_track != new_track:
-            print_(" * %s (%i -> %i)" % (item.title, cur_track, new_track))
+            print_(" * %s (%s -> %s)" % (item.title, cur_track, new_track))
 
 CHOICE_SKIP = 'CHOICE_SKIP'
 CHOICE_ASIS = 'CHOICE_ASIS'
 CHOICE_MANUAL = 'CHOICE_MANUAL'
-def choose_candidate(cur_artist, cur_album, candidates, rec):
+def choose_candidate(cur_artist, cur_album, candidates, rec, color=True):
     """Given current metadata and a sorted list of
     (distance, candidate) pairs, ask the user for a selection
     of which candidate to use. Returns the selected candidate.
@@ -91,15 +130,15 @@ def choose_candidate(cur_artist, cur_album, candidates, rec):
             print_('Finding tags for "%s - %s".' % (cur_artist, cur_album))
             print_('Candidates:')
             for i, (dist, items, info) in enumerate(candidates):
-                print_('%i. %s - %s (%f)' % (i+1, info['artist'],
-                                             info['album'], dist))
+                print_('%i. %s - %s (%s)' % (i+1, info['artist'],
+                    info['album'], dist_string(dist, color)))
                                             
             # Ask the user for a choice.
             sel = ui.input_options(
-                '# selection (default 1), Skip, Use as-is, or '
-                'Enter manual search?',
-                ('s', 'u', 'e'), '1',
-                'Enter a numerical selection, S, U, or E:',
+                '# selection (default 1), Skip, Use as-is, '
+                'Enter search, or aBort?',
+                ('s', 'u', 'e', 'b'), '1',
+                'Enter a numerical selection, S, U, E, or B:',
                 (1, len(candidates))
             )
             if sel == 's':
@@ -108,12 +147,14 @@ def choose_candidate(cur_artist, cur_album, candidates, rec):
                 return CHOICE_ASIS
             elif sel == 'e':
                 return CHOICE_MANUAL
+            elif sel == 'b':
+                raise ImportAbort()
             else: # Numerical selection.
                 dist, items, info = candidates[sel-1]
         bypass_candidates = False
     
         # Show what we're about to do.
-        show_change(cur_artist, cur_album, items, info, dist)
+        show_change(cur_artist, cur_album, items, info, dist, color)
     
         # Exact match => tag automatically.
         if rec == autotag.RECOMMEND_STRONG:
@@ -121,10 +162,10 @@ def choose_candidate(cur_artist, cur_album, candidates, rec):
         
         # Ask for confirmation.
         sel = ui.input_options(
-            '[A]pply, More candidates, Skip, Use as-is, or '
-            'Enter manual search?',
-            ('a', 'm', 's', 'u', 'e'), 'a',
-            'Enter A, M, S, U, or E:'
+            '[A]pply, More candidates, Skip, Use as-is, '
+            'Enter search, or aBort?',
+            ('a', 'm', 's', 'u', 'e', 'b'), 'a',
+            'Enter A, M, S, U, E, or B:'
         )
         if sel == 'a':
             return info
@@ -136,6 +177,8 @@ def choose_candidate(cur_artist, cur_album, candidates, rec):
             return CHOICE_ASIS
         elif sel == 'e':
             return CHOICE_MANUAL
+        elif sel == 'b':
+            raise ImportAbort()
 
 def manual_search():
     """Input an artist and album for manual search."""
@@ -143,45 +186,32 @@ def manual_search():
     album = raw_input('Album: ')
     return artist.strip(), album.strip()
 
-def tag_log(logfile, status, items):
+def tag_log(logfile, status, path):
     """Log a message about a given album to logfile. The status should
     reflect the reason the album couldn't be tagged.
     """
     if logfile:
-        path = os.path.commonprefix([item.path for item in items])
-        print >>logfile, status, os.path.dirname(path)
+        print >>logfile, '%s %s' % (status, path)
 
-def tag_album(items, lib, copy=True, write=True, logfile=None, art=False):
-    """Import items into lib, tagging them as an album. If copy, then
-    items are copied into the destination directory. If write, then
-    new metadata is written back to the files' tags. If logfile is
-    provided, then a log message will be added there if the album is
-    untaggable. If art, then try to download album art for the album.
+def choose_match(path, items, cur_artist, cur_album, candidates,
+                 rec, color=True):
+    """Given an initial autotagging of items, go through an interactive
+    dance with the user to ask for a choice of metadata. Returns an
+    info dictionary, CHOICE_ASIS, or CHOICE_SKIP.
     """
-    # Try to get candidate metadata.
-    search_artist, search_album = None, None
-    cur_artist, cur_album = None, None
+    # Loop until we have a choice.
     while True:
-        # Infer tags.
-        try:
-            cur_artist, cur_album, candidates, rec = \
-                    autotag.tag_album(items, search_artist, search_album)
-        except autotag.AutotagError:
-            cur_artist, cur_album, candidates, rec = None, None, None, None
-            info = None
+        # Choose from candidates, if available.
+        if candidates:
+            info = choose_candidate(cur_artist, cur_album, candidates, rec,
+                                    color)
         else:
-            if candidates:
-                info = choose_candidate(cur_artist, cur_album, candidates, rec)
-            else:
-                info = None
-        
-        # Fallback: if either an error ocurred or no matches found.
-        if not info:
-            print_("No match found for:", os.path.dirname(items[0].path))
+            # Fallback: if either an error ocurred or no matches found.
+            print_("No match found for:", path)
             sel = ui.input_options(
-                "[U]se as-is, Skip, or Enter manual search?",
+                "[U]se as-is, Skip, Enter manual search, or aBort?",
                 ('u', 's', 'e'), 'u',
-                'Enter U, S, or E:'
+                'Enter U, S, E, or B:'
             )
             if sel == 'u':
                 info = CHOICE_ASIS
@@ -189,134 +219,305 @@ def tag_album(items, lib, copy=True, write=True, logfile=None, art=False):
                 info = CHOICE_MANUAL
             elif sel == 's':
                 info = CHOICE_SKIP
+            elif sel == 'b':
+                raise ImportAbort()
     
         # Choose which tags to use.
         if info is CHOICE_SKIP:
             # Skip entirely.
-            tag_log(logfile, 'skip', items)
-            return
+            return info
         elif info is CHOICE_MANUAL:
             # Try again with manual search terms.
             search_artist, search_album = manual_search()
         else:
-            # Either ASIS or we have a candidate. Continue tagging.
-            break
-    
-    # Ensure that we don't have the album already.
-    if info is not CHOICE_ASIS or cur_artist is not None:
-        if info is CHOICE_ASIS:
-            artist = cur_artist
-            album = cur_album
-            tag_log(logfile, 'asis', items)
-        else:
-            artist = info['artist']
-            album = info['album']
-        q = library.AndQuery((library.MatchQuery('artist', artist),
-                              library.MatchQuery('album',  album)))
-        count, _ = q.count(lib)
-        if count >= 1:
-            print_("This album (%s - %s) is already in the library!" %
-                   (artist, album))
-            return
-    
-    # Change metadata, move, and copy.
-    if info is not CHOICE_ASIS:
-        autotag.apply_metadata(items, info)
-    for item in items:
-        if copy:
-            item.move(lib, True)
-        if write and info is not CHOICE_ASIS:
-            item.write()
+            # Either ASIS or we have a candidate. Finish tagging.
+            return info
+        
+        # Search for entered terms.
+        try:
+            _, _, candidates, rec = \
+                    autotag.tag_album(items, search_artist, search_album)
+        except autotag.AutotagError:
+            candidates, rec = None, None
 
-    # Add items to library. We consolidate this at the end to avoid
-    # locking while we do the copying and tag updates.
-    for item in items:
-        lib.add(item)
-    
-    # Get album art.
-    if info is not CHOICE_ASIS:
-        if art:
-            artpath = autotag.art.art_for_album(info)
-            if artpath:
-                artdest = lib.art_path(items[0], artpath)
-                #fixme -- move if possible?
-                shutil.copy(artpath, artdest)
-                lib.albuminfo(items[0]).artpath = artdest
+def _reopen_lib(lib):
+    """Because of limitations in SQLite, a given Library is bound to
+    the thread in which it was created. This function reopens Library
+    objects so that they can be used from separate threads.
+    """
+    if isinstance(lib, library.Library):
+        return library.Library(
+            lib.path,
+            lib.directory,
+            lib.path_format,
+            lib.art_filename,
+        )
+    else:
+        return lib
+
+# Utilities for reading and writing the beets progress file, which
+# allows long tagging tasks to be resumed when they pause (or crash).
+PROGRESS_KEY = 'tagprogress'
+def progress_set(toppath, path):
+    """Record that tagging for the given `toppath` was successful up to
+    `path`. If path is None, then clear the progress value (indicating
+    that the tagging completed).
+    """
+    try:
+        with open(ui.STATE_FILE) as f:
+            state = pickle.load(f)
+    except IOError:
+        state = {PROGRESS_KEY: {}}
+
+    if path is None:
+        # Remove progress from file.
+        if toppath in state[PROGRESS_KEY]:
+            del state[PROGRESS_KEY][toppath]
+    else:
+        state[PROGRESS_KEY][toppath] = path
+
+    with open(ui.STATE_FILE, 'w') as f:
+        pickle.dump(state, f)
+def progress_get(toppath):
+    """Get the last successfully tagged subpath of toppath. If toppath
+    has no progress information, returns None.
+    """
+    try:
+        with open(ui.STATE_FILE) as f:
+            state = pickle.load(f)
+    except IOError:
+        return None
+    return state[PROGRESS_KEY].get(toppath)
+
+# Core autotagger pipeline stages.
+
+# This sentinel is passed along as the "path" when a directory has finished
+# tagging.
+DONE_SENTINEL = '__IMPORT_DONE_SENTINEL__'
+
+def read_albums(paths):
+    """A generator yielding all the albums (as sets of Items) found in
+    the user-specified list of paths.
+    """
+    # Check the user-specified directories.
+    for path in paths:
+        if not os.path.isdir(path):
+            raise ui.UserError('not a directory: ' + path)
+    # Look for saved progress.
+    resume_dirs = {}
+    for path in paths:
+        resume_dir = progress_get(path)
+        if resume_dir:
+            resume = ui.input_yn("Tagging of the directory:\n%s"
+                                 "\nwas interrupted. Resume (Y/n)? " %
+                                 path)
+            if resume:
+                resume_dirs[path] = resume_dir
             else:
-                log.info('no album art found for %s - %s' %
-                         (info['artist'], info['album']))
+                # Clear progress; we're starting from the top.
+                progress_set(path, None)
+            ui.print_()
+    
+    for toppath in paths:
+        # Produce each path.
+        resume_dir = resume_dirs.get(toppath)
+        for path, items in autotag.albums_in_dir(os.path.expanduser(toppath)):
+            if resume_dir:
+                # We're fast-forwarding to resume a previous tagging.
+                if path == resume_dir:
+                    # We've hit the last good path! Turn off the
+                    # fast-forwarding.
+                    resume_dir = None
+                continue
 
-def import_files(lib, paths, copy=True, write=True, autot=True,
-                 logpath=None, art=False):
+            yield toppath, path, items
+
+        # Indicate the directory is finished.
+        yield toppath, DONE_SENTINEL, None
+
+def initial_lookup():
+    """A coroutine for performing the initial MusicBrainz lookup for an
+    album. It accepts lists of Items and yields
+    (items, cur_artist, cur_album, candidates, rec) tuples. If no match
+    is found, all of the yielded parameters (except items) are None.
+    """
+    toppath, path, items = yield
+    while True:
+        if path is DONE_SENTINEL:
+            cur_artist, cur_album, candidates, rec = None, None, None, None
+        else:
+            try:
+                cur_artist, cur_album, candidates, rec = \
+                        autotag.tag_album(items)
+            except autotag.AutotagError:
+                cur_artist, cur_album, candidates, rec = \
+                        None, None, None, None
+        toppath, path, items = yield toppath, path, items, cur_artist, \
+                                     cur_album, candidates, rec
+
+def user_query(lib, logfile=None, color=True):
+    """A coroutine for interfacing with the user about the tagging
+    process. lib is the Library to import into and logfile may be
+    a file-like object for logging the import process. The coroutine
+    accepts (items, cur_artist, cur_album, candidates, rec) tuples.
+    items is a set of Items in the album to be tagged; the remaining
+    parameters are the result of an initial lookup from MusicBrainz.
+    The coroutine yields (items, info) pairs where info is either a
+    candidate info dict, CHOICE_ASIS, or None (indicating that the
+    album should not be tagged).
+    """
+    lib = _reopen_lib(lib)
+    first = True
+    out = None
+    while True:
+        toppath, path, items, cur_artist, cur_album, candidates, rec = yield out
+
+        if path is DONE_SENTINEL:
+            out = toppath, path, None, None
+            continue
+        
+        # Empty lines between albums.
+        if not first:
+            print_()
+        first = False
+        
+        # Ask the user for a choice.
+        info = choose_match(path, items, cur_artist, cur_album, candidates,
+                            rec, color)
+
+        # The "give-up" options.
+        if info is CHOICE_ASIS:
+            tag_log(logfile, 'asis', path)
+        elif info is CHOICE_SKIP:
+            tag_log(logfile, 'skip', path)
+            # Yield None, indicating that the pipeline should not
+            # progress.
+            out = toppath, path, items, None
+            continue
+
+        # Ensure that we don't have the album already.
+        if info is not CHOICE_ASIS or cur_artist is not None:
+            if info is CHOICE_ASIS:
+                artist = cur_artist
+                album = cur_album
+            else:
+                artist = info['artist']
+                album = info['album']
+            q = library.AndQuery((library.MatchQuery('artist', artist),
+                                  library.MatchQuery('album',  album)))
+            count, _ = q.count(lib)
+            if count >= 1:
+                print_("This album (%s - %s) is already in the library!" %
+                       (artist, album))
+                out = toppath, path, items, None
+                continue
+        
+        # Yield the result and get the next chunk of work.
+        out = toppath, path, items, info
+        
+def apply_choices(lib, copy, write, art):
+    """A coroutine for applying changes to albums during the autotag
+    process. The parameters to the generator control the behavior of
+    the import. The coroutine accepts (items, info) pairs and yields
+    nothing. items the set of Items to import; info is either a
+    candidate info dictionary or CHOICE_ASIS.
+    """
+    lib = _reopen_lib(lib)
+    while True:    
+        # Get next chunk of work.
+        toppath, path, items, info = yield
+
+        # Check for "path finished" message.
+        if path is DONE_SENTINEL:
+            # Mark path as complete.
+            progress_set(toppath, None)
+            continue
+        
+        # Only process the items if info is not None (indicating a
+        # skip).
+        if info is not None:
+
+            # Change metadata, move, and copy.
+            if info is not CHOICE_ASIS:
+                autotag.apply_metadata(items, info)
+            for item in items:
+                if copy:
+                    item.move(lib, True)
+                if write and info is not CHOICE_ASIS:
+                    item.write()
+
+            # Add items to library. We consolidate this at the end to avoid
+            # locking while we do the copying and tag updates.
+            albuminfo = lib.add_album(items)
+
+            # Get album art if requested.
+            if art and info is not CHOICE_ASIS:
+                artpath = beets.autotag.art.art_for_album(info)
+                if artpath:
+                    albuminfo.set_art(artpath)
+
+            # Write the database after each album.
+            lib.save()
+
+        # Update progress.
+        progress_set(toppath, path)
+
+# The import command.
+
+def import_files(lib, paths, copy, write, autot, logpath,
+                 art, threaded, color):
     """Import the files in the given list of paths, tagging each leaf
     directory as an album. If copy, then the files are copied into
     the library folder. If write, then new metadata is written to the
     files themselves. If not autot, then just import the files
     without attempting to tag. If logpath is provided, then untaggable
-    albums will be logged there. If art, then try to download album art
-    for each album.
+    albums will be logged there. If art, then attempt to download
+    cover art for each album. If threaded, then accelerate autotagging
+    imports by running them in multiple threads. If color, then
+    ANSI-colorize some terminal output.
     """
+    # Open the log.
     if logpath:
         logfile = open(logpath, 'w')
     else:
         logfile = None
     
-    if autot:        
-        # Make sure we have only directories.
-        for path in paths:
-            if not os.path.isdir(path):
-                raise ui.UserError('not a directory: ' + path)
-        
-        # Crawl albums and tag them.
-        first = True
-        for path in paths:
-            for album in autotag.albums_in_dir(os.path.expanduser(path)):
-                if not first:
-                    print_()
-                first = False
+    # Perform the import.
+    if autot:
+        # Autotag. Set up the pipeline.
+        pl = pipeline.Pipeline([
+            read_albums(paths),
+            initial_lookup(),
+            user_query(lib, logfile, color),
+            apply_choices(lib, copy, write, art),
+        ])
 
-                # Infer tags.
-                tag_album(album, lib, copy, write, logfile, art)
-                
-                # Write the database after each album.
-                lib.save()
-    
-    else:
-        # No autotagging. Just walk the paths.
-        for path in paths:
-            if os.path.isdir(path):
-                # Find all files in the directory.
-                filepaths = []
-                for root, dirs, files in autotag._sorted_walk(path):
-                    for filename in files:
-                        filepaths.append(os.path.join(root, filename))
+        # Run the pipeline.
+        try:
+            if threaded:
+                pl.run_parallel()
             else:
-                # Just add the file.
-                filepaths = [path]
-            
-            # Add all the files.
-            for filepath in filepaths:
-                try:
-                    item = library.Item.from_path(filepath)
-                except FileTypeError:
-                    continue
-                except UnreadableFileError:
-                    log.warn('unreadable file: ' + filepath)
-                    continue
-                
-            
-                # Add the item to the library, copying if requested.
-                if copy:
+                pl.run_sequential()
+        except ImportAbort:
+            # User aborted operation. Silently stop.
+            pass
+    else:
+        # Simple import without autotagging. Always sequential.
+        for _, _, items in read_albums(paths):
+            if items is None:
+                continue
+            if copy:
+                for item in items:
                     item.move(lib, True)
-                # Don't write tags because nothing changed.
-                lib.add(item)
-        
-        # Save when completely finished.
-        lib.save()
+            lib.add_album(items)
+            lib.save()
     
     # If we were logging, close the file.
     if logfile:
         logfile.close()
+
+    # Emit event.
+    plugins.send('import', lib=lib, paths=paths)
 
 import_cmd = ui.Subcommand('import', help='import new music',
     aliases=('imp', 'im'))
@@ -350,7 +551,11 @@ def import_func(lib, config, opts, args):
     art = opts.art if opts.art is not None else \
         ui.config_val(config, 'beets', 'import_art',
             DEFAULT_IMPORT_ART, bool)
-    import_files(lib, args, copy, write, autot, opts.logpath, art)
+    threaded = ui.config_val(config, 'beets', 'threaded',
+            DEFAULT_THREADED, bool)
+    color = ui.config_val(config, 'beets', 'color', DEFAULT_COLOR, bool)
+    import_files(lib, args, copy, write, autot,
+                 opts.logpath, art, threaded, color)
 import_cmd.func = import_func
 default_commands.append(import_cmd)
 
@@ -362,8 +567,8 @@ def list_items(lib, query, album):
     albums instead of single items.
     """
     if album:
-        for artist, album in lib.albums(query=query):
-            print_(artist + ' - ' + album)
+        for album in lib.albums(query=query):
+            print_(album.artist + ' - ' + album.album)
     else:
         for item in lib.items(query=query):
             print_(item.artist + ' - ' + item.album + ' - ' + item.title)
@@ -385,9 +590,10 @@ def remove_items(lib, query, album, delete=False):
     """
     # Get the matching items.
     if album:
+        albums = list(lib.albums(query=query))
         items = []
-        for artist, album in lib.albums(query=query):
-            items += list(lib.items(artist=artist, album=album))
+        for al in albums:
+            items += al.items()
     else:
         items = list(lib.items(query=query))
 
@@ -409,9 +615,14 @@ def remove_items(lib, query, album, delete=False):
     if not ui.input_yn(prompt, True):
         return
 
-    # Remove and delete.
-    for item in items:
-        lib.remove(item, delete)
+    # Remove (and possibly delete) items.
+    if album:
+        for al in albums:
+            al.remove(delete)
+    else:
+        for item in items:
+            lib.remove(item, delete)
+
     lib.save()
 
 remove_cmd = ui.Subcommand('remove',
@@ -465,4 +676,3 @@ def stats_func(lib, config, opts, args):
     show_stats(lib, ui.make_query(args))
 stats_cmd.func = stats_func
 default_commands.append(stats_cmd)
-

@@ -657,9 +657,19 @@ class Command(object):
         """
         command_match = self.command_re.match(s)
         self.name = command_match.group(1)
+
+        self.args = []
         arg_matches = self.arg_re.findall(s[command_match.end():])
-        self.args = [m[0] or m[1] for m in arg_matches]
-        self.args = [s.decode('utf8') for s in self.args]
+        for match in arg_matches:
+            if match[0]:
+                # Quoted argument.
+                arg = match[0]
+                arg = arg.replace('\\"', '"').replace('\\\\', '\\')
+            else:
+                # Unquoted argument.
+                arg = match[1]
+            arg = arg.decode('utf8')
+            self.args.append(arg)
         
     def run(self, conn):
         """Executes the command on the given connection.
@@ -826,7 +836,8 @@ class Server(BaseServer):
                 conn.send(u'directory: ' + seq_to_path((artist,), PATH_PH))
         elif album is None: # List all albums for an artist.
             for album in self.lib.albums(artist):
-                conn.send(u'directory: ' + seq_to_path(album, PATH_PH))
+                parts = (album.artist, album.album)
+                conn.send(u'directory: ' + seq_to_path(parts, PATH_PH))
         elif track is None: # List all tracks on an album.
             for item in self.lib.items(artist, album):
                 conn.send(*self._item_info(item))
@@ -847,7 +858,8 @@ class Server(BaseServer):
         # albums
         if not album:
             for a in self.lib.albums(artist or None):
-                conn.send(u'directory: ' + seq_to_path(a, PATH_PH))
+                parts = a.artist, a.album
+                conn.send(u'directory: ' + seq_to_path(parts, PATH_PH))
 
         # tracks
         items = self.lib.items(artist or None, album or None)
