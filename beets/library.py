@@ -766,8 +766,10 @@ class BaseAlbum(object):
     album-level metadata or use distinct backing stores.
     """
     def __init__(self, library, record):
-        self._library = library
-        self._record = record
+        # Need to use object.__setattr__ here, since we're overriding
+        # it for this class
+        object.__setattr__(self, '_library', library)
+        object.__setattr__(self, '_record', record)
 
     def __getattr__(self, key):
         """Get the value for an album attribute."""
@@ -1087,10 +1089,16 @@ class Library(BaseLibrary):
         """
         # Set the metadata from the first item.
         #fixme: check for consensus?
+        item_values = dict(
+            (key, getattr(items[0], key)) for key in ALBUM_KEYS_ITEM)
+        if not item_values['albumartist']:
+            item_values['albumartist'] = getattr(items[0], 'artist')
+
+
         sql = 'INSERT INTO albums (%s) VALUES (%s)' % \
               (', '.join(ALBUM_KEYS_ITEM),
                ', '.join(['?'] * len(ALBUM_KEYS_ITEM)))
-        subvals = [getattr(items[0], key) for key in ALBUM_KEYS_ITEM]
+        subvals = [item_values[key] for key in ALBUM_KEYS_ITEM]
         c = self.conn.execute(sql, subvals)
         album_id = c.lastrowid
 
