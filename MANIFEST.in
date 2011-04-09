@@ -1,0 +1,7 @@
+# Exclude tests from the source distribution. They require resources
+# that make the distribution heavier than it needs to be.
+prune test
+
+# Include documentation.
+include LICENSE NEWS README.rst
+
