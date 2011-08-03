@@ -20,6 +20,7 @@ import logging
 import sys
 import os
 import time
+import copy
 import itertools
 
 from beets import ui
@@ -28,6 +29,7 @@ from beets import autotag
 import beets.autotag.art
 from beets import plugins
 from beets import importer
+from beets.library import ITEM_MODIFIED, ITEM_DELETED
 from beets.util import syspath, normpath, ancestry
 from beets import library
 
@@ -181,6 +183,21 @@ def show_item_change(item, info, dist, color):
         print_("Tagging track: %s - %s" % (cur_artist, cur_title))
 
     print_('(Similarity: %s)' % dist_string(dist, color))
+
+def show_item_update(old_item, new_item, color=True):
+    """Print out the changes detected on an existing item."""
+    old_artist, new_artist = old_item.artist, new_item.artist
+    old_title, new_title = old_item.title, new_item.title
+    
+    if old_artist != new_artist or old_title != new_title:
+        if color:
+            old_artist, new_artist = ui.colordiff(old_artist, new_artist)
+            old_title, new_title = ui.colordiff(old_title, new_title)
+        
+        print_("Updated: %s - %s -> %s - %s" % (old_artist, old_title, new_artist, new_title))
+    
+    else:
+        print_("Updated: %s - %s (secondary tags)" % (old_artist, old_title))
 
 def should_resume(config, path):
     return ui.input_yn("Import of the directory:\n%s"
@@ -653,6 +670,56 @@ def list_func(lib, config, opts, args):
     list_items(lib, decargs(args), opts.album, opts.path)
 list_cmd.func = list_func
 default_commands.append(list_cmd)
+
+
+# update: Query and update library contents.
+
+def update_items(lib, query, album, path):
+    """Print out items in lib matching query. If album, then search for
+    albums instead of single items. If path, print the matched objects'
+    paths instead of human-readable information about them.
+    """
+    # Get the matching items.
+    if album:
+        albums = list(lib.albums(query))
+        items = []
+        for al in albums:
+            items += al.items()
+    else:
+        items = list(lib.items(query))
+
+    if not items:
+        print_('No matching items found.')
+        return
+
+    # Show all the items.
+    #for item in items:
+    #    print_(item.artist + ' - ' + item.album + ' - ' + item.title)
+
+    # Remove (and possibly delete) items.
+    if album:
+        for al in albums:
+            al.update()
+    else:
+        for item in items:
+            old_item = copy.deepcopy(item)
+            ret = lib.update(item)
+            if ret == ITEM_MODIFIED:
+                show_item_update(old_item, item)
+            elif ret == ITEM_DELETED:
+                print_("Deleted: %s - %s" % (item.artist, item.title))
+
+    lib.save()
+
+update_cmd = ui.Subcommand('update', help='update the library', aliases=('upd','up',))
+update_cmd.parser.add_option('-a', '--album', action='store_true',
+    help='show matching albums instead of tracks')
+update_cmd.parser.add_option('-p', '--path', action='store_true',
+    help='print paths for matched items or albums')
+def update_func(lib, config, opts, args):
+    update_items(lib, decargs(args), opts.album, opts.path)
+update_cmd.func = update_func
+default_commands.append(update_cmd)
 
 
 # remove: Remove items from library, delete files.
