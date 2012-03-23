@@ -570,10 +570,17 @@ def resolve_duplicate(task, config):
     """
     log.warn("This %s is already in the library!" %
              ("album" if task.is_album else "item"))
-    sel = ui.input_options(
-        ('Skip new', 'Keep both', 'Remove old'),
-        color=config.color
-    )
+
+    if config.quiet:
+        # In quiet mode, don't prompt -- just skip.
+        log.info('Skipping.')
+        sel = 's'
+    else:
+        sel = ui.input_options(
+            ('Skip new', 'Keep both', 'Remove old'),
+            color=config.color
+        )
+
     if sel == 's':
         # Skip new.
         task.set_choice(importer.action.SKIP)
@@ -582,7 +589,7 @@ def resolve_duplicate(task, config):
         pass
     elif sel == 'r':
         # Remove old.
-        task.remove_duplictes = True
+        task.remove_duplicates = True
     else:
         assert False
 
