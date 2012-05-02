@@ -809,6 +809,7 @@ def list_items(lib, query, album, path, fmt):
             fmt = u'$albumartist - $album'
         else:
             fmt = u'$artist - $album - $title'
+
     template = Template(fmt)
 
     if album:
@@ -816,13 +817,13 @@ def list_items(lib, query, album, path, fmt):
             if path:
                 print_(album.item_dir())
             elif fmt is not None:
-                print_(template.substitute(album._record))
+                print_(album.evaluate_template(template))
     else:
         for item in lib.items(query):
             if path:
                 print_(item.path)
             elif fmt is not None:
-                print_(template.substitute(item.record))
+                print_(item.evaluate_template(template, lib))
 
 list_cmd = ui.Subcommand('list', help='query the library', aliases=('ls',))
 list_cmd.parser.add_option('-a', '--album', action='store_true',
