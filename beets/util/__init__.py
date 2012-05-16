@@ -8,11 +8,13 @@
 # distribute, sublicense, and/or sell copies of the Software, and to
 # permit persons to whom the Software is furnished to do so, subject to
 # the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be
 # included in all copies or substantial portions of the Software.
 
 """Miscellaneous utility functions."""
+from __future__ import division
+
 import os
 import sys
 import re
@@ -39,11 +41,11 @@ def ancestry(path, pathmod=None):
     last_path = None
     while path:
         path = pathmod.dirname(path)
-        
+
         if path == last_path:
             break
         last_path = path
-    
+
         if path: # don't yield ''
             out.insert(0, path)
     return out
@@ -149,13 +151,13 @@ def components(path, pathmod=None):
         comp = pathmod.basename(anc)
         if comp:
             comps.append(comp)
-        else: # root
+        else:  # root
             comps.append(anc)
-    
+
     last = pathmod.basename(path)
     if last:
         comps.append(last)
-    
+
     return comps
 
 def bytestring_path(path):
@@ -337,10 +339,10 @@ def sanitize_for_path(value, pathmod, key=None):
         value = u'%02i' % (value or 0)
     elif key == 'bitrate':
         # Bitrate gets formatted as kbps.
-        value = u'%ikbps' % ((value or 0) / 1000)
+        value = u'%ikbps' % ((value or 0) // 1000)
     elif key == 'samplerate':
         # Sample rate formatted as kHz.
-        value = u'%ikHz' % ((value or 0) / 1000)
+        value = u'%ikHz' % ((value or 0) // 1000)
     else:
         value = unicode(value)
     return value
@@ -361,7 +363,7 @@ def levenshtein(s1, s2):
         return levenshtein(s2, s1)
     if not s1:
         return len(s2)
- 
+
     previous_row = xrange(len(s2) + 1)
     for i, c1 in enumerate(s1):
         current_row = [i + 1]
@@ -371,7 +373,7 @@ def levenshtein(s1, s2):
             substitutions = previous_row[j] + (c1 != c2)
             current_row.append(min(insertions, deletions, substitutions))
         previous_row = current_row
- 
+
     return previous_row[-1]
 
 def plurality(objs):

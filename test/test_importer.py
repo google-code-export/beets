@@ -8,7 +8,7 @@
 # distribute, sublicense, and/or sell copies of the Software, and to
 # permit persons to whom the Software is furnished to do so, subject to
 # the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be
 # included in all copies or substantial portions of the Software.
 
@@ -16,6 +16,7 @@
 """
 import os
 import shutil
+import StringIO
 
 import _common
 from _common import unittest
@@ -700,22 +701,22 @@ class DuplicateCheckTest(unittest.TestCase):
         self.assertTrue(res)
 
     def test_duplicate_item_apply(self):
-        res = importer._item_duplicate_check(self.lib, 
+        res = importer._item_duplicate_check(self.lib,
                                              self._item_task(False))
         self.assertTrue(res)
 
     def test_different_item_apply(self):
-        res = importer._item_duplicate_check(self.lib, 
+        res = importer._item_duplicate_check(self.lib,
                                     self._item_task(False, 'xxx', 'yyy'))
         self.assertFalse(res)
 
     def test_duplicate_item_asis(self):
-        res = importer._item_duplicate_check(self.lib, 
+        res = importer._item_duplicate_check(self.lib,
                                              self._item_task(True))
         self.assertTrue(res)
 
     def test_different_item_asis(self):
-        res = importer._item_duplicate_check(self.lib, 
+        res = importer._item_duplicate_check(self.lib,
                                     self._item_task(True, 'xxx', 'yyy'))
         self.assertFalse(res)
 
@@ -725,7 +726,7 @@ class DuplicateCheckTest(unittest.TestCase):
         self.assertFalse(res)
 
     def test_duplicate_item_existing(self):
-        res = importer._item_duplicate_check(self.lib, 
+        res = importer._item_duplicate_check(self.lib,
                                         self._item_task(False, existing=True))
         self.assertFalse(res)
 
@@ -826,6 +827,17 @@ class ArtFetchTest(unittest.TestCase, _common.ExtraAsserts):
         shutil.copyfile(self.art_file, artdest)
         art.art_for_album = lambda a, b: artdest
         self._fetch_art(True)
+
+class TagLogTest(unittest.TestCase):
+    def test_tag_log_line(self):
+        sio = StringIO.StringIO()
+        importer.tag_log(sio, 'status', 'path')
+        assert 'status path' in sio.getvalue()
+
+    def test_tag_log_unicode(self):
+        sio = StringIO.StringIO()
+        importer.tag_log(sio, 'status', 'caf\xc3\xa9')
+        assert 'status caf' in sio.getvalue()
 
 def suite():
     return unittest.TestLoader().loadTestsFromName(__name__)
