@@ -14,10 +14,12 @@
 
 """Like beet list, but with fuzzy matching
 """
+import beets
 from beets.plugins import BeetsPlugin
 from beets.ui import Subcommand, decargs, print_
 from beets.util.functemplate import Template
 import difflib
+
 
 # THRESHOLD = 0.7
 
@@ -35,18 +37,19 @@ def is_match(query, item, album=False, verbose=False, threshold=0.7):
         values = [item.artist, item.album, item.title]
 
     s = max(fuzzy_score(query.lower(), i.lower()) for i in values)
-    if s >= threshold:
-        return (True, s) if verbose else True
+    if verbose:
+        return (s >= threshold, s)
     else:
-        return (False, s) if verbose else False
+        return s >= threshold
 
 
 def fuzzy_list(lib, config, opts, args):
     query = decargs(args)
-    path = opts.path
     fmt = opts.format
-    verbose = opts.verbose
-    threshold = float(opts.threshold)
+    if opts.threshold is not None:
+        threshold = float(opts.threshold)
+    else:
+        threshold = float(conf['threshold'])
 
     if fmt is None:
         # If no specific template is supplied, use a default
@@ -61,24 +64,18 @@ def fuzzy_list(lib, config, opts, args):
     else:
         objs = lib.items()
 
-    if opts.album:
-        for album in objs:
-            if is_match(query, album, album=True, threshold=threshold):
-                if path:
-                    print_(album.item_dir())
-                else:
-                    print_(album.evaluate_template(template))
-                if verbose:
-                    print is_match(query, album, album=True, verbose=True)[1]
-    else:
-        for item in objs:
-            if is_match(query, item, threshold=threshold):
-                if path:
-                    print_(item.path)
-                else:
-                    print_(item.evaluate_template(template, lib))
-                if verbose:
-                    print is_match(query, item, verbose=True)[1]
+    items = filter(lambda i: is_match(query, i, album=opts.album,
+                                      threshold=threshold), objs)
+    for i in items:
+        if opts.path:
+            print_(i.item_dir() if opts.album else i.path)
+        elif opts.album:
+            print_(i.evaluate_template(template))
+        else:
+            print_(i.evaluate_template(template, lib))
+        if opts.verbose:
+            print(is_match(query, i, album=opts.album, verbose=True)[1])
+
 
 fuzzy_cmd = Subcommand('fuzzy',
                         help='list items using fuzzy matching')
@@ -92,10 +89,16 @@ fuzzy_cmd.parser.add_option('-v', '--verbose', action='store_true',
         help='output scores for matches')
 fuzzy_cmd.parser.add_option('-t', '--threshold', action='store',
         help='return result with a fuzzy score above threshold. \
-              (default is 0.7)', default=0.7)
+              (default is 0.7)', default=None)
 fuzzy_cmd.func = fuzzy_list
+
+conf = {}
 
 
 class Fuzzy(BeetsPlugin):
     def commands(self):
         return [fuzzy_cmd]
+
+    def configure(self, config):
+        conf['threshold'] = beets.ui.config_val(config, 'fuzzy',
+                                                'threshold', 0.7)
