@@ -16,6 +16,7 @@
 """
 import logging
 import os
+import sys
 import shutil
 from subprocess import Popen, PIPE
 
@@ -26,6 +27,7 @@ from beetsplug.embedart import _embed
 log = logging.getLogger('beets')
 DEVNULL = open(os.devnull, 'wb')
 conf = {}
+
 
 
 def encode(source, dest):
@@ -116,7 +118,8 @@ def convert_func(lib, config, opts, args):
 class ConvertPlugin(BeetsPlugin):
     def configure(self, config):
         conf['dest'] = ui.config_val(config, 'convert', 'dest', None)
-        conf['threads'] = ui.config_val(config, 'convert', 'threads', 2)
+        conf['threads'] = ui.config_val(config, 'convert', 'threads',
+            util.cpu_count())
         conf['flac'] = ui.config_val(config, 'convert', 'flac', 'flac')
         conf['lame'] = ui.config_val(config, 'convert', 'lame', 'lame')
         conf['opts'] = ui.config_val(config, 'convert',
@@ -131,7 +134,8 @@ class ConvertPlugin(BeetsPlugin):
         cmd.parser.add_option('-a', '--album', action='store_true',
                               help='choose albums instead of tracks')
         cmd.parser.add_option('-t', '--threads', action='store', type='int',
-                              help='change the number of threads (default 2)')
+                              help='change the number of threads, \
+                              defaults to maximum availble processors ')
         cmd.parser.add_option('-d', '--dest', action='store',
                               help='set the destination directory')
         cmd.func = convert_func
