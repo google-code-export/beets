@@ -20,10 +20,9 @@ import sys
 import shutil
 from subprocess import Popen, PIPE
 
-import imghdr
-
 from beets.plugins import BeetsPlugin
-from beets import ui, library, util, mediafile
+from beets import ui, library, util
+from beetsplug.embedart import _embed
 
 log = logging.getLogger('beets')
 DEVNULL = open(os.devnull, 'wb')
@@ -54,27 +53,6 @@ def _cpu_count():
         return num
     else:
         return 1
-
-
-def _embed(path, items):
-    """Embed an image file, located at `path`, into each item.
-    """
-    data = open(util.syspath(path), 'rb').read()
-    kindstr = imghdr.what(None, data)
-    if kindstr not in ('jpeg', 'png'):
-        log.error('A file of type %s is not allowed as coverart.' % kindstr)
-        return
-    log.debug('Embedding album art.')
-    for item in items:
-        try:
-            f = mediafile.MediaFile(util.syspath(item.path))
-        except mediafile.UnreadableFileError as exc:
-            log.warn('Could not embed art in {0}: {1}'.format(
-                repr(item.path), exc
-            ))
-            continue
-        f.art = data
-        f.save()
 
 
 def encode(source, dest):
@@ -110,20 +88,24 @@ def convert_item(lib, dest_dir):
     while True:
         item = yield
         if item.format != 'FLAC' and item.format != 'MP3':
-            log.info('Skipping {0} : not supported format'.format(item.path))
+            log.info('Skipping {0} (unsupported format)'.format(
+                util.displayable_path(item.path)
+            ))
             continue
 
         dest = os.path.join(dest_dir, lib.destination(item, fragment=True))
         dest = os.path.splitext(dest)[0] + '.mp3'
 
         if os.path.exists(dest):
-            log.info('Skipping {0} : target file exists'.format(item.path))
+            log.info('Skipping {0} (target file exists)'.format(
+                util.displayable_path(item.path)
+            ))
             continue
 
         util.mkdirall(dest)
         if item.format == 'MP3' and item.bitrate < 1000 * conf['max_bitrate']:
-            log.info('Copying {0}'.format(item.path))
-            shutil.copy(item.path, dest)
+            log.info('Copying {0}'.format(util.displayable_path(item.path)))
+            util.copy(item.path, dest)
             dest_item = library.Item.from_path(dest)
         else:
             encode(item.path, dest)
@@ -139,8 +121,7 @@ def convert_item(lib, dest_dir):
 def convert_func(lib, config, opts, args):
     dest = opts.dest if opts.dest is not None else conf['dest']
     if not dest:
-        log.error('No destination set')
-        return
+        raise ui.UserError('no convert destination set')
     threads = opts.threads if opts.threads is not None else conf['threads']
 
     fmt = '$albumartist - $album' if opts.album \

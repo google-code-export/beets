@@ -4,8 +4,8 @@ Changelog
 1.0b16 (in development)
 -----------------------
 
-* New plugin: :doc:`/plugins/convert` lets you convert parts of your collection
-  to an external directory using flac and lame.
+* New plugin: :doc:`/plugins/convert` transcodes music and embeds album art
+  while copying to a separate directory. Thanks to Jakob Schnitzer.
 * New plugin: :doc:`/plugins/fuzzy_search` lets you find albums and tracks using
   fuzzy string matching so you don't have to type (or even remember) their exact
   names. Thanks to Philippe Mongeau.
@@ -16,11 +16,14 @@ Changelog
 * New plugin: :doc:`/plugins/ihate` automatically skips (or warns you about)
   importing albums that match certain criteria. Thanks once again to Blemjhoo
   Tezoulbr.
+* :doc:`/plugins/replaygain`: This plugin has been completely overhauled to use
+  the `mp3gain`_ or `aacgain`_ command-line tools instead of the failure-prone
+  Gstreamer ReplayGain implementation. Thanks to Fabrice Laporte.
 * :doc:`/plugins/scrub`: Scrubbing now removes *all* types of tags from a file
   rather than just one. For example, if your FLAC file has both ordinary FLAC
   tags and ID3 tags, the ID3 tags are now also removed.
 * :ref:`stats-cmd` command: New ``--exact`` switch to make the file size
-  calculation more accurate (thanks to yagebu).
+  calculation more accurate (thanks to Jakob Schnitzer).
 * :ref:`list-cmd` command: Templates given with ``-f`` can now show items' paths
   (using ``$path``).
 * Fix album queries for ``artpath`` and other non-item fields.
@@ -30,7 +33,7 @@ Changelog
 * :doc:`/plugins/lastgenre`: Use the albums' existing genre tags if they pass
   the whitelist (thanks to Fabrice Laporte).
 * :doc:`/plugins/lastgenre`: Add a ``lastgenre`` command for fetching genres
-  post facto (thanks to yagebu).
+  post facto (thanks to Jakob Schnitzer).
 * :doc:`/plugins/fetchart`: Fix a bug where cover art filenames could lack
   a ``.jpg`` extension.
 * :doc:`/plugins/lyrics`: Fix an exception with non-ASCII lyrics.
@@ -48,8 +51,12 @@ Changelog
 * Fix a VFS bug leading to a crash in the :doc:`/plugins/bpd` when files had
   non-ASCII extensions.
 * Add a human-readable error message when writing files' tags fails.
+* Changed plugin loading so that modules can be imported without
+  unintentionally loading the plugins they contain.
 
 .. _Tomahawk resolver: http://beets.radbox.org/blog/tomahawk-resolver.html
+.. _mp3gain: http://mp3gain.sourceforge.net/download.php
+.. _aacgain: http://aacgain.altosdesign.com
 
 1.0b15 (July 26, 2012)
 ----------------------
