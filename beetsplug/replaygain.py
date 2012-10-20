@@ -42,20 +42,6 @@ def call(args):
             "{0} exited with status {1}".format(args[0], e.returncode)
         )
 
-def reduce_gain_for_noclip(track_peaks, album_gain):
-    """Reduce album gain value until no song is clipped.
-    No command switch give you the max no-clip in album mode. 
-    So we consider the recommended gain and decrease it until no song is
-    clipped when applying the gain.
-    Formula found at: 
-    http://www.hydrogenaudio.org/forums/lofiversion/index.php/t10630.html
-    """
-    if album_gain > 0:
-        maxpcm = max(track_peaks)
-        while (maxpcm * (2 ** (album_gain / 4.0)) > 32767):
-            album_gain -= 1 
-    return album_gain
-
 def parse_tool_output(text):
     """Given the tab-delimited output from an invocation of mp3gain
     or aacgain, parse the text and return a list of dictionaries
@@ -86,6 +72,8 @@ class ReplayGainPlugin(BeetsPlugin):
     def configure(self, config):
         self.overwrite = ui.config_val(config, 'replaygain',
                                        'overwrite', False, bool)
+        self.albumgain = ui.config_val(config, 'replaygain',
+                                       'albumgain', False, bool)
         self.noclip = ui.config_val(config, 'replaygain',
                                     'noclip', True, bool)
         self.apply_gain = ui.config_val(config, 'replaygain',
@@ -207,7 +195,7 @@ class ReplayGainPlugin(BeetsPlugin):
             cmd = cmd + ['-c']
         if self.apply_gain:
             # Lossless audio adjustment.
-            cmd = cmd + ['-a' if album else '-r']
+            cmd = cmd + ['-a' if album and self.albumgain else '-r']
         cmd = cmd + ['-d', str(self.gain_offset)]
         cmd = cmd + [syspath(i.path) for i in items]
 
@@ -215,13 +203,6 @@ class ReplayGainPlugin(BeetsPlugin):
         output = call(cmd)
         log.debug('replaygain: analysis finished')
         results = parse_tool_output(output)
-
-        # Adjust for noclip mode.
-        if album and self.noclip:
-            album_gain = results[-1]['gain']
-            track_peaks = [r['peak'] for r in results[:-1]]
-            album_gain = reduce_gain_for_noclip(track_peaks, album_gain)
-            results[-1]['gain'] = album_gain
 
         return results
 
@@ -234,14 +215,17 @@ class ReplayGainPlugin(BeetsPlugin):
             item.rg_track_peak = info['peak']
             lib.store(item)
 
-            log.debug('replaygain: applied track gain {0}, peak {1}; '
-                        'album gain {2}, peak {3}'.format(
-                item.rg_track_gain, item.rg_track_peak,
-                item.rg_album_gain, item.rg_album_peak
+            log.debug('replaygain: applied track gain {0}, peak {1}'.format(
+                item.rg_track_gain,
+                item.rg_track_peak
             ))
 
-        if album:
+        if album and self.albumgain:
             assert len(rgain_infos) == len(items) + 1
             album_info = rgain_infos[-1]
             album.rg_album_gain = album_info['gain']
             album.rg_album_peak = album_info['peak']
+            log.debug('replaygain: applied album gain {0}, peak {1}'.format(
+                album.rg_album_gain,
+                album.rg_album_peak
+            ))
