@@ -273,7 +273,13 @@ class Item(object):
             read_path = self.path
         else:
             read_path = normpath(read_path)
-        f = MediaFile(syspath(read_path))
+        try:
+            f = MediaFile(syspath(read_path))
+        except Exception:
+            log.error('failed reading file: {0}'.format(
+                displayable_path(read_path))
+            )
+            raise
 
         for key in ITEM_KEYS_META:
             setattr(self, key, getattr(f, key))
