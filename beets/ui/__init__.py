@@ -172,7 +172,7 @@ def input_options(options, require=False, prompt=None, fallback_prompt=None,
         index = option.index(found_letter)
 
         # Mark the option's shortcut letter for display.
-        if (default is None and not numrange and first) \
+        if (not require and default is None and not numrange and first) \
            or (isinstance(default, basestring) and
                found_letter.lower() == default.lower()):
             # The first option is the default; mark it.
@@ -723,6 +723,7 @@ def main(args=None):
     """
     try:
         _raw_main(args)
+        plugins.send('cli_exit')
     except UserError as exc:
         message = exc.args[0] if exc.args else None
         log.error(u'error: {0}'.format(message))
