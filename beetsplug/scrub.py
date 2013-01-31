@@ -100,7 +100,14 @@ def _scrub(path):
             continue
 
         # Remove the tag for this type.
-        f.delete()
+        try:
+            f.delete()
+        except NotImplementedError:
+            # Some Mutagen metadata subclasses (namely, ASFTag) do not
+            # support .delete(), presumably because it is impossible to
+            # remove them. In this case, we just remove all the tags.
+            for tag in f.keys():
+                del f[tag]
         f.save()
 
 # Automatically embed art into imported albums.
