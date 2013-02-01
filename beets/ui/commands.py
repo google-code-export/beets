@@ -209,7 +209,7 @@ def show_change(cur_artist, cur_album, match):
             if tracks_differ:
                 lhs += u' (%s)' % cur_track
                 rhs += u' (%s)' % new_track
-            print_(u" * %s -> %s" % (lhs, rhs))
+            print_(u" * %s ->\n   %s" % (lhs, rhs))
         else:
             line = u' * %s' % item.title
             display = False
@@ -255,17 +255,37 @@ def show_item_change(item, match):
 
     print_('(Similarity: %s)' % dist_string(match.distance))
 
-def _quiet_fall_back():
-    """Show the user that the default action is being taken because
-    we're in quiet mode and the recommendation is not strong.
+def _summary_judment(rec):
+    """Determines whether a decision should be made without even asking
+    the user. This occurs in quiet mode and when an action is chosen for
+    NONE recommendations. Return an action or None if the user should be
+    queried. May also print to the console if a summary judgment is
+    made.
     """
-    fallback = config['import']['quiet_fallback'].as_choice(['skip', 'asis'])
-    if fallback == 'skip':
-        print_('Skipping.')
-        return importer.action.SKIP
+    if config['import']['quiet']:
+        if rec == autotag.RECOMMEND_STRONG:
+            return importer.action.APPLY
+        else:
+            action = config['import']['quiet_fallback'].as_choice({
+                'skip': importer.action.SKIP,
+                'asis': importer.action.ASIS,
+            })
+
+    elif rec == autotag.RECOMMEND_NONE:
+        action = config['import']['none_rec_action'].as_choice({
+            'skip': importer.action.SKIP,
+            'asis': importer.action.ASIS,
+            'ask': None,
+        })
+
     else:
+        return None
+
+    if action == importer.action.SKIP:
+        print_('Skipping.')
+    elif action == importer.action.ASIS:
         print_('Importing as-is.')
-        return importer.action.ASIS
+    return action
 
 def choose_candidate(candidates, singleton, rec, cur_artist=None,
                      cur_album=None, item=None, itemcount=None):
@@ -324,6 +344,8 @@ def choose_candidate(candidates, singleton, rec, cur_artist=None,
 
     while True:
         # Display and choose from candidates.
+        require = rec in (autotag.RECOMMEND_NONE, autotag.RECOMMEND_LOW)
+
         if not bypass_candidates:
             # Display list of candidates.
             if singleton:
@@ -385,10 +407,11 @@ def choose_candidate(candidates, singleton, rec, cur_artist=None,
             elif sel == 'i':
                 return importer.action.MANUAL_ID
             else:  # Numerical selection.
-                if singleton:
-                    match = candidates[sel - 1]
-                else:
-                    match = candidates[sel - 1]
+                match = candidates[sel - 1]
+                if sel != 1:
+                    # When choosing anything but the first match,
+                    # disable the default action.
+                    require = True
         bypass_candidates = False
 
         # Show what we're about to do.
@@ -408,7 +431,15 @@ def choose_candidate(candidates, singleton, rec, cur_artist=None,
         else:
             opts = ('Apply', 'More candidates', 'Skip', 'Use as-is',
                     'as Tracks', 'Enter search', 'enter Id', 'aBort')
-        sel = ui.input_options(opts)
+        default = config['import']['default_action'].as_choice({
+            'apply': 'a',
+            'skip': 's',
+            'asis': 'u',
+            'none': None,
+        })
+        if default is None:
+            require = True
+        sel = ui.input_options(opts, require=require, default=default)
         if sel == 'a':
             return match
         elif sel == 'm':
@@ -463,14 +494,14 @@ class TerminalImportSession(importer.ImportSession):
         print_()
         print_(task.path)
 
-        if config['import']['quiet']:
-            # No input; just make a decision.
-            if task.rec == autotag.RECOMMEND_STRONG:
-                match = task.candidates[0]
-                show_change(task.cur_artist, task.cur_album, match)
-                return match
-            else:
-                return _quiet_fall_back()
+        # Take immediate action if appropriate.
+        action = _summary_judment(task.rec)
+        if action == importer.action.APPLY:
+            match = task.candidates[0]
+            show_change(task.cur_artist, task.cur_album, match)
+            return match
+        elif action is not None:
+            return action
 
         # Loop until we have a choice.
         candidates, rec = task.candidates, task.rec
@@ -516,14 +547,14 @@ class TerminalImportSession(importer.ImportSession):
         print_(task.item.path)
         candidates, rec = task.candidates, task.rec
 
-        if config['import']['quiet']:
-            # Quiet mode; make a decision.
-            if rec == autotag.RECOMMEND_STRONG:
-                match = candidates[0]
-                show_item_change(task.item, match)
-                return match
-            else:
-                return _quiet_fall_back()
+        # Take immediate action if appropriate.
+        action = _summary_judment(task.rec)
+        if action == importer.action.APPLY:
+            match = candidates[0]
+            show_item_change(task.item, match)
+            return match
+        elif action is not None:
+            return action
 
         while True:
             # Ask for a choice.

@@ -4,9 +4,33 @@ Changelog
 1.1b2 (in development)
 ----------------------
 
+New configuration options:
+
+* :ref:`default_action` lets you determine the default (just-hit-return) option
+  is when considering a candidate.
+* :ref:`none_rec_action` lets you skip the prompt, and automatically choose an
+  action, when there is no good candidate. Thanks to mrmachine.
+
+Other new stuff:
+
 * Support for Windows Media/ASF audio files. Thanks to Dave Hayes.
-* Two new plugin events were added: *database_change* and *cli_exit*. Thanks to
-  Dang Mai Hai.
+* New :doc:`/plugins/smartplaylist`: generate and maintain m3u playlist files
+  based on beets queries. Thanks to Dang Mai Hai.
+* Two new plugin events were added: *database_change* and *cli_exit*. Thanks
+  again to Dang Mai Hai.
+* Track titles in the importer's difference display are now broken across two
+  lines for readability. Thanks to mrmachine.
+* Some changes to the way candidates are recommended for selection, thanks to
+  mrmachine:
+
+  * Partial album matches are never "strong" recommendations.
+  * When a match isn't great but is either better than all the others or the
+    only match, it is given a "low" (rather than "medium") recommendation.
+  * There is no prompt default (i.e., input is required) when matches are
+    bad: "low" or "none" recommendations or when choosing a candidate
+    other than the first.
+
+* Fix an error when migrating the ``.beetsstate`` file on Windows.
 
 1.1b1 (January 29, 2013)
 ------------------------

@@ -30,20 +30,18 @@ class ZeroPlugin(BeetsPlugin):
     _instance = None
     _log = logging.getLogger('beets')
 
-    def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super(ZeroPlugin,
-                                  cls).__new__(cls, *args, **kwargs)
-        return cls._instance
-
     def __init__(self):
         super(ZeroPlugin, self).__init__()
+
+        # Listeners.
+        self.register_listener('write', self.write_event)
+        self.register_listener('import_task_choice',
+                               self.import_task_choice_event)
 
         self.config.add({
             'fields': [],
         })
 
-        self.fields = []
         self.patterns = {}
         self.warned = False
 
@@ -51,13 +49,12 @@ class ZeroPlugin(BeetsPlugin):
             if f not in ITEM_KEYS:
                 self._log.error(u'[zero] invalid field: {0}'.format(f))
             else:
-                self.fields.append(f)
                 try:
                     self.patterns[f] = self.config[f].as_str_seq()
                 except confit.NotFoundError:
                     self.patterns[f] = [u'']
 
-    def import_task_choice_event(self, task):
+    def import_task_choice_event(self, session, task):
         """Listen for import_task_choice event."""
         if task.choice_flag == action.ASIS and not self.warned:
             self._log.warn(u'[zero] cannot zero in \"as-is\" mode')
@@ -76,31 +73,22 @@ class ZeroPlugin(BeetsPlugin):
 
     def write_event(self, item):
         """Listen for write event."""
-        if not self.fields:
+        if not self.patterns:
             self._log.warn(u'[zero] no fields, nothing to do')
             return
-        for fn in self.fields:
+        for fn, patterns in self.patterns.items():
             try:
                 fval = getattr(item, fn)
             except AttributeError:
                 self._log.error(u'[zero] no such field: {0}'.format(fn))
             else:
-                if not self.match_patterns(fval, self.patterns[fn]):
+                if not self.match_patterns(fval, patterns):
                     self._log.debug(u'[zero] \"{0}\" ({1}) not match: {2}'
                                     .format(fval, fn, 
-                                            ' '.join(self.patterns[fn])))
+                                            ' '.join(patterns)))
                     continue
                 self._log.debug(u'[zero] \"{0}\" ({1}) match: {2}'
-                                .format(fval, fn, ' '.join(self.patterns[fn])))
+                                .format(fval, fn, ' '.join(patterns)))
                 setattr(item, fn, type(fval)())
                 self._log.debug(u'[zero] {0}={1}'
                                 .format(fn, getattr(item, fn)))
-
-
-@ZeroPlugin.listen('import_task_choice')
-def zero_choice(session, task):
-    ZeroPlugin().import_task_choice_event(task)
-
-@ZeroPlugin.listen('write')
-def zero_write(item):
-    ZeroPlugin().write_event(item)
