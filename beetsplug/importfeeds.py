@@ -33,13 +33,21 @@ class ImportFeedsPlugin(BeetsPlugin):
             'formats': [],
             'm3u_name': u'imported.m3u',
             'dir': None,
+            'relative_to': None,
         })
         
         feeds_dir = self.config['dir'].get()
         if feeds_dir: 
-            self.config['dir'] = os.path.expanduser(bytestring_path(feeds_dir))
+            feeds_dir = os.path.expanduser(bytestring_path(feeds_dir))
+            self.config['dir'] = feeds_dir
             if not os.path.exists(syspath(feeds_dir)):
                 os.makedirs(syspath(feeds_dir))
+
+        relative_to = self.config['relative_to'].get()
+        if relative_to:
+            self.config['relative_to'] = normpath(relative_to)
+        else:
+            self.config['relative_to'] = feeds_dir
 
 def _get_feeds_dir(lib):
     """Given a Library object, return the path to the feeds directory to be
@@ -78,11 +86,13 @@ def _record_items(lib, basename, items):
     """
     feedsdir = config['importfeeds']['dir'].as_filename()
     formats = config['importfeeds']['formats'].as_str_seq()
+    relative_to = config['importfeeds']['relative_to'].get() \
+            or config['importfeeds']['dir'].as_filename()
 
     paths = []
     for item in items:
         paths.append(os.path.relpath(
-            item.path, feedsdir
+            item.path, relative_to
         ))
 
     if 'm3u' in formats:
@@ -96,7 +106,7 @@ def _record_items(lib, basename, items):
 
     if 'link' in formats:
         for path in paths:
-            dest = os.path.join(feedsdir, os.path.basename(path))
+            dest = os.path.join(feedsdir, normpath(os.path.basename(path)))
             if not os.path.exists(dest):
                 os.symlink(path, dest)
 

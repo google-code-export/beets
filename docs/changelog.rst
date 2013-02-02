@@ -1,10 +1,48 @@
 Changelog
 =========
 
-1.1b1 (in development)
+1.1b2 (in development)
 ----------------------
 
-This release entirely revamps beets' configuration system.
+New configuration options:
+
+* :ref:`default_action` lets you determine the default (just-hit-return) option
+  is when considering a candidate.
+* :ref:`none_rec_action` lets you skip the prompt, and automatically choose an
+  action, when there is no good candidate. Thanks to mrmachine.
+
+Other new stuff:
+
+* Support for Windows Media/ASF audio files. Thanks to Dave Hayes.
+* New :doc:`/plugins/smartplaylist`: generate and maintain m3u playlist files
+  based on beets queries. Thanks to Dang Mai Hai.
+* Two new plugin events were added: *database_change* and *cli_exit*. Thanks
+  again to Dang Mai Hai.
+* Track titles in the importer's difference display are now broken across two
+  lines for readability. Thanks to mrmachine.
+* Some changes to the way candidates are recommended for selection, thanks to
+  mrmachine:
+
+  * Partial album matches are never "strong" recommendations.
+  * When a match isn't great but is either better than all the others or the
+    only match, it is given a "low" (rather than "medium") recommendation.
+  * There is no prompt default (i.e., input is required) when matches are
+    bad: "low" or "none" recommendations or when choosing a candidate
+    other than the first.
+
+* Album listings in the importer UI now show the release medium (CD, LP,
+  etc.). Thanks to Peter Schnebel.
+* Fix an error when migrating the ``.beetsstate`` file on Windows.
+
+1.1b1 (January 29, 2013)
+------------------------
+
+This release entirely revamps beets' configuration system. The configuration
+file is now a `YAML`_ document and is located, along with other support files,
+in a common directory (e.g., ``~/.config/beets`` on Unix-like systems). If
+you're upgrading from an earlier version, please see :doc:`/guides/migration`.
+
+.. _YAML: http://en.wikipedia.org/wiki/YAML
 
 * Renamed plugins: The ``rdm`` plugin has been renamed to ``random`` and
   ``fuzzy_search`` has been renamed to ``fuzzy``.
@@ -28,13 +66,23 @@ It also adds some new features:
   :ref:`musicbrainz-config`.
 * You can now configure the similarity thresholds used to determine when the
   autotagger automatically accepts a metadata match. See :ref:`match-config`.
+* :doc:`/plugins/importfeeds`: Added a new configuration option that controls
+  the base for relative paths used in m3u files. Thanks to Philippe Mongeau.
 
-1.0.0 (in development)
-----------------------
+1.0.0 (January 29, 2013)
+------------------------
+
+After fifteen betas and two release candidates, beets has finally hit
+one-point-oh. Congratulations to everybody involved. This version of beets will
+remain stable and receive only bug fixes from here on out. New development is
+ongoing in the betas of version 1.1.
 
 * :doc:`/plugins/scrub`: Fix an incompatibility with Python 2.6.
 * :doc:`/plugins/lyrics`: Fix an issue that failed to find lyrics when metadata
   contained "real" apostrophes.
+* :doc:`/plugins/replaygain`: On Windows, emit a warning instead of
+  crashing when analyzing non-ASCII filenames.
+* Silence a spurious warning from version 0.04.12 of the Unidecode module.
 
 1.0rc2 (December 31, 2012)
 --------------------------

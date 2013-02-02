@@ -37,7 +37,7 @@ library
 ~~~~~~~
 
 Path to the beets library file. By default, beets will use a file called
-``beetsmusic.blb`` alongside your configuration file.
+``library.db`` alongside your configuration file.
 
 directory
 ~~~~~~~~~
@@ -250,6 +250,16 @@ Either ``skip`` (default) or ``asis``, specifying what should happen in
 quiet mode (see the ``-q`` flag to ``import``, above) when there is no
 strong recommendation.
 
+.. _none_rec_action:
+
+none_rec_action
+~~~~~~~~~~~~~~~
+
+Either ``ask`` (default), ``asis`` or ``skip``. Specifies what should happen
+during an interactive import session when there is no recommendation. Useful
+when you are only interested in processing medium and strong recommendations
+interactively.
+
 timid
 ~~~~~
 
@@ -264,6 +274,16 @@ log
 Specifies a filename where the importer's log should be kept.  By default,
 no log is written. This can be overridden with the ``-l`` flag to
 ``import``.
+
+.. _default_action:
+
+default_action
+~~~~~~~~~~~~~~
+
+One of ``apply``, ``skip``, ``asis``, or ``none``, indicating which option
+should be the *default* when selecting an action for a given match. This is the
+action that will be taken when you type return without an option letter. The
+default is ``apply``.
 
 .. _musicbrainz-config:
 
