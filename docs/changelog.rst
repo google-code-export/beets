@@ -18,8 +18,8 @@ Other new stuff:
   based on beets queries. Thanks to Dang Mai Hai.
 * Two new plugin events were added: *database_change* and *cli_exit*. Thanks
   again to Dang Mai Hai.
-* Track titles in the importer's difference display are now broken across two
-  lines for readability. Thanks to mrmachine.
+* Track titles in the importer UI's difference display are now either aligned
+  vertically or broken across two lines for readability. Thanks to mrmachine.
 * Some changes to the way candidates are recommended for selection, thanks to
   mrmachine:
 
@@ -30,9 +30,19 @@ Other new stuff:
     bad: "low" or "none" recommendations or when choosing a candidate
     other than the first.
 
-* Album listings in the importer UI now show the release medium (CD, LP,
+* Album listings in the importer UI now show the release medium (CD, Vinyl,
   etc.). Thanks to Peter Schnebel.
+* :doc:`/plugins/mpdupdate`: Sends an update message whenever *anything* in the
+  database changes---not just when importing. Thanks to Dang Mai Hai.
+* When the importer UI shows a difference in track numbers or durations, they
+  are now colorized based on the *suffixes* that differ. For example, when
+  showing the difference between 2:01 and 2:09, only the last digit will be
+  highlighted.
+* The importer UI no longer shows a change when the track length difference is
+  less than 10 seconds. (This threshold was previously 2 seconds.)
 * Fix an error when migrating the ``.beetsstate`` file on Windows.
+* A nicer error message is now given when the configuration file contains tabs.
+  (YAML doesn't like tabs.)
 
 1.1b1 (January 29, 2013)
 ------------------------
