@@ -181,47 +181,60 @@ def show_change(cur_artist, cur_album, match):
     # Tracks.
     pairs = match.mapping.items()
     pairs.sort(key=lambda (_, track_info): track_info.index)
+
+    # Build up LHS and RHS for track difference display. The `lines`
+    # list contains ``(current title, new title, width)`` tuples where
+    # `width` is the length (in characters) of the uncolorized LHS.
+    lines = []
     for item, track_info in pairs:
-        # Get displayable LHS and RHS values.
-        cur_track = unicode(item.track)
-        new_track = format_index(track_info)
-        tracks_differ = item.track not in (track_info.index,
-                                           track_info.medium_index)
-        cur_title = item.title
+        # Titles.
         new_title = track_info.title
-        if item.length and track_info.length:
-            cur_length = ui.colorize('red',
-                                     ui.human_seconds_short(item.length))
-            new_length = ui.colorize('red',
-                                     ui.human_seconds_short(track_info.length))
-
-        # Colorize changes.
-        cur_title, new_title = ui.colordiff(cur_title, new_title)
-        cur_track = ui.colorize('red', cur_track)
-        new_track = ui.colorize('red', new_track)
-
-        # Show filename (non-colorized) when title is not set.
         if not item.title.strip():
+            # If there's no title, we use the filename.
             cur_title = displayable_path(os.path.basename(item.path))
-
-        if cur_title != new_title:
             lhs, rhs = cur_title, new_title
-            if tracks_differ:
-                lhs += u' (%s)' % cur_track
-                rhs += u' (%s)' % new_track
-            print_(u" * %s ->\n   %s" % (lhs, rhs))
         else:
-            line = u' * %s' % item.title
-            display = False
-            if tracks_differ:
-                display = True
-                line += u' (%s -> %s)' % (cur_track, new_track)
-            if item.length and track_info.length and \
-                    abs(item.length - track_info.length) > 2.0:
-                display = True
-                line += u' (%s vs. %s)' % (cur_length, new_length)
-            if display:
-                print_(line)
+            cur_title = item.title.strip()
+            lhs, rhs = ui.colordiff(cur_title, new_title)
+        lhs_width = len(cur_title)
+
+        # Track number change.
+        if item.track not in (track_info.index, track_info.medium_index):
+            cur_track, new_track = unicode(item.track), format_index(track_info)
+            lhs_track, rhs_track = ui.color_diff_suffix(cur_track, new_track)
+            templ = ui.colorize('red', u' (#') + u'{0}' + \
+                    ui.colorize('red', u')')
+            lhs += templ.format(lhs_track)
+            rhs += templ.format(rhs_track)
+            lhs_width += len(cur_track) + 4
+
+        # Length change.
+        if item.length and track_info.length and \
+                abs(item.length - track_info.length) > \
+                config['ui']['length_diff_thresh'].as_number():
+            cur_length = ui.human_seconds_short(item.length)
+            new_length = ui.human_seconds_short(track_info.length)
+            lhs_length, rhs_length = ui.color_diff_suffix(cur_length,
+                                                          new_length)
+            templ = ui.colorize('red', u' (') + u'{0}' + \
+                    ui.colorize('red', u')')
+            lhs += templ.format(lhs_length)
+            rhs += templ.format(rhs_length)
+            lhs_width += len(cur_length) + 3
+
+        if lhs != rhs:
+            lines.append((lhs, rhs, lhs_width))
+
+    # Print each track in two columns, or across two lines.
+    col_width = (ui.term_width() - len(''.join([' * ', ' -> ']))) // 2
+    if lines:
+        max_width = max(w for _, _, w in lines)
+        for lhs, rhs, lhs_width in lines:
+            if max_width > col_width:
+                print_(u' * %s ->\n   %s' % (lhs, rhs))
+            else:
+                pad = max_width - lhs_width
+                print_(u' * %s%s -> %s' % (lhs, ' ' * pad, rhs))
 
     # Missing and unmatched tracks.
     for track_info in match.extra_tracks:

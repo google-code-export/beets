@@ -27,6 +27,7 @@ import logging
 import sqlite3
 import errno
 import re
+import struct
 
 from beets import library
 from beets import plugins
@@ -413,6 +414,29 @@ def colordiff(a, b, highlight='red'):
     else:
         return unicode(a), unicode(b)
 
+def color_diff_suffix(a, b, highlight='red'):
+    """Colorize the differing suffix between two strings."""
+    a, b = unicode(a), unicode(b)
+    if not config['color']:
+        return a, b
+
+    # Fast path.
+    if a == b:
+        return a, b
+
+    # Find the longest common prefix.
+    first_diff = None
+    for i in range(min(len(a), len(b))):
+        if a[i] != b[i]:
+            first_diff = i
+            break
+    else:
+        first_diff = min(len(a), len(b))
+
+    # Colorize from the first difference on.
+    return a[:first_diff] + colorize(highlight, a[first_diff:]), \
+           b[:first_diff] + colorize(highlight, b[first_diff:])
+
 def get_path_formats():
     """Get the configuration's path formats as a list of query/template
     pairs.
@@ -476,6 +500,28 @@ def print_obj(obj, lib, fmt=None):
         print_(obj.evaluate_template(template))
     else:
         print_(obj.evaluate_template(template, lib=lib))
+
+def term_width():
+    """Get the width (columns) of the terminal."""
+    fallback = config['ui']['terminal_width'].get(int)
+
+    # The fcntl and termios modules are not available on non-Unix
+    # platforms, so we fall back to a constant.
+    try:
+        import fcntl
+        import termios
+    except ImportError:
+        return fallback
+
+    try:
+        buf = fcntl.ioctl(0, termios.TIOCGWINSZ, ' '*4)
+    except IOError:
+        return fallback
+    try:
+        height, width = struct.unpack('hh', buf)
+    except struct.error:
+        return fallback
+    return width
 
 
 # Subcommand parsing infrastructure.
