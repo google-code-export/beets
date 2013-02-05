@@ -193,11 +193,25 @@ def mkdirall(path):
                 raise FilesystemError(exc, 'create', (ancestor,),
                                       traceback.format_exc())
 
+def fnmatch_all(names, patterns):
+    """Determine whether all strings in `names` match at least one of
+    the `patterns`, which should be shell glob expressions.
+    """
+    for name in names:
+        matches = False
+        for pattern in patterns:
+            matches = fnmatch.fnmatch(name, pattern)
+            if matches:
+                break
+        if not matches:
+            return False
+    return True
+
 def prune_dirs(path, root=None, clutter=('.DS_Store', 'Thumbs.db')):
     """If path is an empty directory, then remove it. Recursively remove
     path's ancestry up to root (which is never removed) where there are
     empty directories. If path is not contained in root, then nothing is
-    removed. Filenames in clutter are ignored when determining
+    removed. Glob patterns in clutter are ignored when determining
     emptiness. If root is not provided, then only path may be removed
     (i.e., no recursive removal).
     """
@@ -224,8 +238,7 @@ def prune_dirs(path, root=None, clutter=('.DS_Store', 'Thumbs.db')):
         if not os.path.exists(directory):
             # Directory gone already.
             continue
-
-        if all(fn in clutter for fn in os.listdir(directory)):
+        if fnmatch_all(os.listdir(directory), clutter):
             # Directory contains only clutter (or nothing).
             try:
                 shutil.rmtree(directory)
