@@ -903,6 +903,17 @@ class MediaFile(object):
     def save(self):
         self.mgfile.save()
 
+    def delete(self):
+        """Remove the current metadata tag from the file.
+        """
+        try:
+            self.mgfile.delete()
+        except NotImplementedError:
+            # For Mutagen types that don't support deletion (notably,
+            # ASF), just delete each tag individually.
+            for tag in self.mgfile.keys():
+                del self.mgfile[tag]
+
 
     # Field definitions.
 
