@@ -67,12 +67,14 @@ Currently, this plugin searches for art in the local filesystem as well as on
 the Cover Art Archive, Amazon, and AlbumArt.org (in that order).
 
 When looking for local album art, beets checks for image files located in the
-same folder as the music files you're importing. beets prefers to use an image
-file which name contains one of the accepted keywords ("cover", "front", "art", "album" or "folder"). 
-In the absence of well-known names, any image file in the 
-same folder as your music files is ignored unless ``cautious`` option is set to false.  
-In case you're not satisfied with the default keywords list it can be changed 
-via the `cover_names` option :: 
+same folder as the music files you're importing. Beets prefers to use an image
+file whose name contains "cover", "front", "art", "album" or "folder", but in
+the absence of well-known names, it will use any image file in the same folder
+as your music files.
+
+You can change the list of filename keywords using the ``server_names`` config
+option. Or, to use *only* filenames containing the keywords and not fall back
+to any image, set ``cautious`` to true. For example::
 
     fetchart:
         cautious: false
