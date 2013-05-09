@@ -159,7 +159,6 @@ ITEM_DEFAULT_FIELDS = ARTIST_DEFAULT_FIELDS + ALBUM_DEFAULT_FIELDS + \
 # Special path format key.
 PF_KEY_DEFAULT = 'default'
 
-
 # Logger.
 log = logging.getLogger('beets')
 if not log.handlers:
@@ -670,7 +669,7 @@ class AnyFieldQuery(CollectionQuery):
             if subq.match(item):
                 return True
         return False
-    
+
 class MutableCollectionQuery(CollectionQuery):
     """A collection query whose subqueries may be modified after the
     query is initialized.
