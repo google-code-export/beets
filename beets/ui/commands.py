@@ -23,6 +23,7 @@ import time
 import itertools
 import re
 import codecs
+from datetime import datetime
 
 import beets
 from beets import ui
@@ -31,6 +32,7 @@ from beets import autotag
 from beets.autotag import recommendation
 from beets import plugins
 from beets import importer
+from beets import util
 from beets.util import syspath, normpath, ancestry, displayable_path
 from beets.util.functemplate import Template
 from beets import library
@@ -89,11 +91,20 @@ def _showdiff(field, oldval, newval):
 
 fields_cmd = ui.Subcommand('fields',
     help='show fields available for queries and format strings')
+
 def fields_func(lib, opts, args):
-    print("Available item fields:")
+    print("Item fields:")
     print("  " + "\n  ".join([key for key in library.ITEM_KEYS]))
-    print("\nAvailable album fields:")
+
+    print("\nAlbum fields:")
     print("  " + "\n  ".join([key for key in library.ALBUM_KEYS]))
+
+    plugin_fields = []
+    for plugin in plugins.find_plugins():
+        plugin_fields += plugin.template_fields.keys()
+    if plugin_fields:
+        print("\nTemplate fields from plugins:")
+        print("  " + "\n  ".join(plugin_fields))
 
 fields_cmd.func = fields_func
 default_commands.append(fields_cmd)
@@ -517,7 +528,8 @@ class TerminalImportSession(importer.ImportSession):
         """
         # Show what we're tagging.
         print_()
-        print_(displayable_path(task.paths, u'\n'))
+        print_(displayable_path(task.paths, u'\n') +
+               u' ({0} items)'.format(len(task.items)))
 
         # Take immediate action if appropriate.
         action = _summary_judment(task.rec)
@@ -986,16 +998,40 @@ default_commands.append(version_cmd)
 
 # modify: Declaratively change metadata.
 
+def _convert_type(key, value, album=False):
+    """Convert a string to the appropriate type for the given field.
+    `album` indicates whether to use album or item field definitions.
+    """
+    fields = library.ALBUM_FIELDS if album else library.ITEM_FIELDS
+    typ = [f[1] for f in fields if f[0] == key][0]
+
+    if typ is bool:
+        return util.str2bool(value)
+    elif typ is datetime:
+        fmt = config['time_format'].get(unicode)
+        try:
+            return time.mktime(time.strptime(value, fmt))
+        except ValueError:
+            raise ui.UserError(u'{0} must have format {1}'.format(key, fmt))
+    else:
+        try:
+            return typ(value)
+        except ValueError:
+            raise ui.UserError(u'{0} must be a {1}'.format(key, typ))
+
 def modify_items(lib, mods, query, write, move, album, confirm):
     """Modifies matching items according to key=value assignments."""
     # Parse key=value specifications into a dictionary.
-    allowed_keys = library.ALBUM_KEYS if album else library.ITEM_KEYS_WRITABLE
+    if album:
+        allowed_keys = library.ALBUM_KEYS
+    else:
+        allowed_keys = library.ITEM_KEYS_WRITABLE + ['added']
     fsets = {}
     for mod in mods:
         key, value = mod.split('=', 1)
         if key not in allowed_keys:
             raise ui.UserError('"%s" is not a valid field' % key)
-        fsets[key] = value
+        fsets[key] = _convert_type(key, value, album)
 
     # Get the items to modify.
     items, albums = _do_query(lib, query, album, False)

@@ -56,7 +56,7 @@ track's artists.
 
 These functions are built in to beets:
 
-* ``%lower{text}``: Convert ``text`` to lowercase. 
+* ``%lower{text}``: Convert ``text`` to lowercase.
 * ``%upper{text}``: Convert ``text`` to UPPERCASE.
 * ``%title{text}``: Convert ``text`` to Title Case.
 * ``%left{text,n}``: Return the first ``n`` characters of ``text``.
@@ -70,8 +70,12 @@ These functions are built in to beets:
   `unidecode module`_.
 * ``%aunique{identifiers,disambiguators}``: Provides a unique string to
   disambiguate similar albums in the database. See :ref:`aunique`, below.
+* ``%time{date_time,format}``: Return the date and time in any format accepted
+  by `strftime`_. For example, to get the year some music was added to your
+  library, use ``%time{$added,%Y}``.
 
 .. _unidecode module: http://pypi.python.org/pypi/Unidecode
+.. _strftime: http://docs.python.org/2/library/time.html#time.strftime
 
 Plugins can extend beets with more template functions (see
 :ref:`writing-plugins`).
@@ -215,3 +219,8 @@ MusicBrainz and fingerprint information:
 * mb_releasegroupid
 * acoustid_fingerprint
 * acoustid_id
+
+Library metadata:
+
+* mtime: The modification time of the audio file.
+* added: The date and time that the music was added to your library.

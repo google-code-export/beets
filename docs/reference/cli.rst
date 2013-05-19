@@ -246,6 +246,8 @@ Show some statistics on your entire library (if you don't provide a
 The ``-e`` (``--exact``) option makes the calculation of total file size more
 accurate but slower.
 
+.. _fields-cmd:
+
 fields
 ``````
 ::
@@ -253,8 +255,7 @@ fields
     beet fields
 
 Show the item and album metadata fields available for use in :doc:`query` and
-:doc:`pathformat`.
-
+:doc:`pathformat`. Includes any template fields provided by plugins.
 
 Global Flags
 ------------
