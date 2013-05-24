@@ -91,6 +91,7 @@ class DiscogsPlugin(BeetsPlugin):
             catalogno = None
         country = result.data.get('country')
         media = result.data['formats'][0]['name']
+        data_url = result.data['uri']
         return AlbumInfo(album, album_id, artist, artist_id, tracks, asin=None,
                          albumtype=albumtype, va=va, year=year, month=None,
                          day=None, label=label, mediums=mediums,
@@ -99,7 +100,8 @@ class DiscogsPlugin(BeetsPlugin):
                          country=country, albumstatus=None, media=media,
                          albumdisambig=None, artist_credit=None,
                          original_year=None, original_month=None,
-                         original_day=None, data_source='Discogs')
+                         original_day=None, data_source='Discogs',
+                         data_url=data_url)
 
     def get_artist(self, artists):
         """Returns an artist string (all artists) and an artist_id (the main
@@ -122,18 +124,30 @@ class DiscogsPlugin(BeetsPlugin):
         """Returns a list of TrackInfo objects for a discogs tracklist.
         """
         tracks = []
+        index_tracks = {}
         index = 0
         for track in tracklist:
             # Only real tracks have `position`. Otherwise, it's an index track.
             if track['position']:
                 index += 1
                 tracks.append(self.get_track_info(track, index))
+            else:
+                index_tracks[index+1] = track['title']
+
         # Fix up medium and medium_index for each track. Discogs position is
         # unreliable, but tracks are in order.
         medium = None
         medium_count, index_count = 0, 0
         for track in tracks:
-            if medium != track.medium:
+            # Handle special case where a different medium does not indicate a
+            # new disc, when there is no medium_index and the ordinal of medium
+            # is not sequential. For example, I, II, III, IV, V. Assume these
+            # are the track index, not the medium.
+            medium_is_index = track.medium and not track.medium_index and (
+                    len(track.medium) != 1 or
+                    ord(track.medium) - 64 != medium_count + 1)
+
+            if not medium_is_index and medium != track.medium:
                 # Increment medium_count and reset index_count when medium
                 # changes.
                 medium = track.medium
@@ -141,6 +155,17 @@ class DiscogsPlugin(BeetsPlugin):
                 index_count = 0
             index_count += 1
             track.medium, track.medium_index = medium_count, index_count
+
+        # Get `disctitle` from Discogs index tracks. Assume that an index track
+        # before the first track of each medium is a disc title.
+        for track in tracks:
+            if track.medium_index == 1:
+                if track.index in index_tracks:
+                    disctitle = index_tracks[track.index]
+                else:
+                    disctitle = None
+            track.disctitle = disctitle
+
         return tracks
 
     def get_track_info(self, track, index):
@@ -158,7 +183,9 @@ class DiscogsPlugin(BeetsPlugin):
     def get_track_index(self, position):
         """Returns the medium and medium index for a discogs track position.
         """
-        match = re.match(r'^(.*?)(\d*)$', position, re.I)
+        # medium_index is a number at the end of position. medium is everything
+        # else. E.g. (A)(1), (Side A, Track )(1), (A)(), ()(1), etc.
+        match = re.match(r'^(.*?)(\d*)$', position.upper())
         if match:
             medium, index = match.groups()
         else:

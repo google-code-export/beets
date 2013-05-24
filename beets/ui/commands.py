@@ -216,12 +216,15 @@ def show_change(cur_artist, cur_album, match):
             message += u' %s' % ui.colorize('yellow', PARTIAL_MATCH_MESSAGE)
         print_(message)
 
+    # Data URL.
+    if match.info.data_url:
+        print_('URL:\n    %s' % match.info.data_url)
+
     # Info line.
     info = []
     info.append('(Similarity: %s)' % dist_string(match.distance))
     if match.info.data_source != 'MusicBrainz':
-        info.append(ui.colorize('yellow',
-                                '(%s)' % match.info.data_source))
+        info.append(ui.colorize('turquoise', '(%s)' % match.info.data_source))
     disambig = disambig_string(match.info)
     if disambig:
         info.append(ui.colorize('lightgray', '(%s)' % disambig))
@@ -231,11 +234,29 @@ def show_change(cur_artist, cur_album, match):
     pairs = match.mapping.items()
     pairs.sort(key=lambda (_, track_info): track_info.index)
 
-    # Build up LHS and RHS for track difference display. The `lines`
-    # list contains ``(current title, new title, width)`` tuples where
-    # `width` is the length (in characters) of the uncolorized LHS.
+    # Build up LHS and RHS for track difference display. The `lines` list
+    # contains ``(lhs, rhs, width)`` tuples where `width` is the length (in
+    # characters) of the uncolorized LHS.
     lines = []
+    medium = disctitle = None
     for item, track_info in pairs:
+
+        # Medium number and title.
+        if medium != track_info.medium or disctitle != track_info.disctitle:
+            media = match.info.media or 'Media'
+            if match.info.mediums > 1 and track_info.disctitle:
+                lhs = '%s %s: %s' % (media, track_info.medium,
+                                     track_info.disctitle)
+            elif match.info.mediums > 1:
+                lhs = '%s %s' % (media, track_info.medium)
+            elif track_info.disctitle:
+                lhs = '%s: %s' % (media, track_info.disctitle)
+            else:
+                lhs = None
+            if lhs:
+                lines.append((lhs, '', 0))
+            medium, disctitle = track_info.medium, track_info.disctitle
+
         # Titles.
         new_title = track_info.title
         if not item.title.strip():
@@ -258,6 +279,7 @@ def show_change(cur_artist, cur_album, match):
                 lhs_track, rhs_track = ui.colorize(color, cur_track), \
                                        ui.colorize(color, new_track)
             else:
+                color = 'red'
                 lhs_track, rhs_track = ui.color_diff_suffix(cur_track,
                                                             new_track)
             templ = ui.colorize(color, u' (#') + u'{0}' + \
@@ -290,13 +312,13 @@ def show_change(cur_artist, cur_album, match):
         if item.mb_trackid and item.mb_trackid != track_info.track_id:
             penalties.append('ID')
         if penalties:
-            rhs += ' %s' % ui.colorize('lightgray',
+            rhs += ' %s' % ui.colorize('red',
                                        '(%s)' % ', '.join(penalties))
 
         if lhs != rhs:
-            lines.append((lhs, rhs, lhs_width))
+            lines.append((' * %s' % lhs, rhs, lhs_width))
         elif config['import']['detail']:
-            lines.append((lhs, '', lhs_width))
+            lines.append((' * %s' % lhs, '', lhs_width))
 
     # Print each track in two columns, or across two lines.
     col_width = (ui.term_width() - len(''.join([' * ', ' -> ']))) // 2
@@ -304,23 +326,28 @@ def show_change(cur_artist, cur_album, match):
         max_width = max(w for _, _, w in lines)
         for lhs, rhs, lhs_width in lines:
             if not rhs:
-                print_(u' * {0}'.format(lhs))
+                print_(lhs)
             elif max_width > col_width:
-                print_(u' * %s ->\n   %s' % (lhs, rhs))
+                print_(u'%s ->\n   %s' % (lhs, rhs))
             else:
                 pad = max_width - lhs_width
-                print_(u' * %s%s -> %s' % (lhs, ' ' * pad, rhs))
+                print_(u'%s%s -> %s' % (lhs, ' ' * pad, rhs))
 
     # Missing and unmatched tracks.
+    if match.extra_tracks:
+        print_('Missing tracks:')
     for track_info in match.extra_tracks:
-        line = u' * Missing track: {0} ({1})'.format(track_info.title,
-                                                     format_index(track_info))
-        line = ui.colorize('yellow', line)
-        print_(line)
+        line = ' ! %s (#%s)' % (track_info.title, format_index(track_info))
+        if track_info.length:
+            line += ' (%s)' % ui.human_seconds_short(track_info.length)
+        print_(ui.colorize('yellow', line))
+    if match.extra_items:
+        print_('Unmatched tracks:')
     for item in match.extra_items:
-        line = u' * Unmatched track: {0} ({1})'.format(item.title, item.track)
-        line = ui.colorize('yellow', line)
-        print_(line)
+        line = ' ! %s (#%s)' % (item.title, format_index(item))
+        if item.length:
+            line += ' (%s)' % ui.human_seconds_short(item.length)
+        print_(ui.colorize('yellow', line))
 
 def show_item_change(item, match):
     """Print out the change that would occur by tagging `item` with the
@@ -453,15 +480,15 @@ def choose_candidate(candidates, singleton, rec, cur_artist=None,
                                                   match.info.album,
                                                   dist_string(match.distance))]
 
-                    # Sources other than MusicBrainz.
-                    source = match.info.data_source
-                    if source != 'MusicBrainz':
-                        line.append(ui.colorize('yellow', '(%s)' % source))
-
                     # Point out the partial matches.
                     if match.extra_items or match.extra_tracks:
                         line.append(ui.colorize('yellow',
                                                 PARTIAL_MATCH_MESSAGE))
+
+                    # Sources other than MusicBrainz.
+                    source = match.info.data_source
+                    if source != 'MusicBrainz':
+                        line.append(ui.colorize('turquoise', '(%s)' % source))
 
                     disambig = disambig_string(match.info)
                     if disambig:
