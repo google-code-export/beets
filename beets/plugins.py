@@ -101,6 +101,18 @@ class BeetsPlugin(object):
         """
         return {}
 
+    def album_for_id(self, album_id):
+        """Return an AlbumInfo object or None if no matching release was
+        found.
+        """
+        return None
+
+    def track_for_id(self, track_id):
+        """Return a TrackInfo object or None if no matching release was
+        found.
+        """
+        return None
+
 
     listeners = None
 
@@ -264,6 +276,26 @@ def item_candidates(item, artist, title):
     out = []
     for plugin in find_plugins():
         out.extend(plugin.item_candidates(item, artist, title))
+    return out
+
+def album_for_id(album_id):
+    """Get AlbumInfo objects for a given ID string.
+    """
+    out = []
+    for plugin in find_plugins():
+        res = plugin.album_for_id(album_id)
+        if res:
+            out.append(res)
+    return out
+
+def track_for_id(track_id):
+    """Get TrackInfo objects for a given ID string.
+    """
+    out = []
+    for plugin in find_plugins():
+        res = plugin.track_for_id(track_id)
+        if res:
+            out.append(res)
     return out
 
 def configure(config):

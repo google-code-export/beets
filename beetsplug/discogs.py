@@ -67,6 +67,30 @@ class DiscogsPlugin(BeetsPlugin):
             log.debug('Discogs API Error: %s (query: %s' % (e, query))
             return []
 
+    def album_for_id(self, album_id):
+        """Fetches an album by its Discogs ID and returns an AlbumInfo object
+        or None if the album is not found.
+        """
+        log.debug('Searching discogs for release %s' % str(album_id))
+        # Discogs-IDs are simple integers. We only look for those at the end
+        # of an input string as to avoid confusion with other metadata plugins.
+        # An optional bracket can follow the integer, as this is how discogs
+        # displays the release ID on its webpage.
+        match  = re.search(r'(^|\[*r|discogs\.com/.+/release/)(\d+)($|\])',
+                           album_id)
+        if not match:
+            return None
+        result = Release(match.group(2))
+        # Try to obtain title to verify that we indeed have a valid Release
+        try:
+            getattr(result, 'title')
+        except DiscogsAPIError as e:
+            if e.message != '404 Not Found':
+                log.debug('Discogs API Error: %s (query: %s)'
+                          % (e, result._uri))
+            return None
+        return self.get_album_info(result)
+
     def get_albums(self, query):
         """Returns a list of AlbumInfo objects for a discogs search query.
         """
@@ -74,10 +98,10 @@ class DiscogsPlugin(BeetsPlugin):
         # cause a query to return no results, even if they match the artist or
         # album title. Use `re.UNICODE` flag to avoid stripping non-english
         # word characters.
-        query = re.sub(r'\W+', ' ', query, re.UNICODE)
+        query = re.sub(r'(?u)\W+', ' ', query)
         # Strip medium information from query, Things like "CD1" and "disk 1"
         # can also negate an otherwise positive result.
-        query = re.sub(r'\b(CD|disc)\s*\d+', '', query, re.I)
+        query = re.sub(r'(?i)\b(CD|disc)\s*\d+', '', query)
         albums = []
         for result in Search(query).results():
             if isinstance(result, Release):
@@ -133,7 +157,7 @@ class DiscogsPlugin(BeetsPlugin):
             # Strip disambiguation number.
             name = re.sub(r' \(\d+\)$', '', name)
             # Move articles to the front.
-            name = re.sub(r'^(.*?), (a|an|the)$', r'\2 \1', name, flags=re.I)
+            name = re.sub(r'(?i)^(.*?), (a|an|the)$', r'\2 \1', name)
             bits.append(name)
             if artist['join']:
                 bits.append(artist['join'])

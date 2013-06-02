@@ -133,16 +133,18 @@ def disambig_string(info):
     """Returns label, year and media disambiguation, if available.
     """
     disambig = []
-    if info.label:
-        disambig.append(info.label)
-    if info.year:
-        disambig.append(unicode(info.year))
     if info.media:
         if info.mediums > 1:
             disambig.append(u'{0}x{1}'.format(
               info.mediums, info.media))
         else:
             disambig.append(info.media)
+    if info.year:
+        disambig.append(unicode(info.year))
+    if info.country:
+        disambig.append(info.country)
+    if info.label:
+        disambig.append(info.label)
     if info.albumdisambig:
         disambig.append(info.albumdisambig)
     if disambig:
@@ -589,20 +591,11 @@ def manual_search(singleton):
     return artist.strip(), name.strip()
 
 def manual_id(singleton):
-    """Input a MusicBrainz ID, either for an album ("release") or a
-    track ("recording"). If no valid ID is entered, returns None.
+    """Input an ID, either for an album ("release") or a track ("recording").
     """
-    prompt = 'Enter MusicBrainz %s ID:' % \
+    prompt = 'Enter %s ID:' % \
              ('recording' if singleton else 'release')
-    entry = input_(prompt).strip()
-
-    # Find the first thing that looks like a UUID/MBID.
-    match = re.search('[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}', entry)
-    if match:
-        return match.group()
-    else:
-        log.error('Invalid MBID.')
-        return None
+    return input_(prompt).strip()
 
 class TerminalImportSession(importer.ImportSession):
     """An import session that runs in a terminal.
