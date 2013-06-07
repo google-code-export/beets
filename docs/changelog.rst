@@ -1,6 +1,39 @@
 Changelog
 =========
 
+1.2.1 (in development)
+----------------------
+
+This release introduces a major internal change in the way that similarity
+scores are handled, thanks to the continued efforts of Tai Lee. The changes
+you'll notice while using the autotagger are:
+
+* The top 3 distance penalties are now displayed on the release listing,
+  and all album and track penalties are now displayed on the track changes
+  list. This should make it clear exactly which metadata is contributing to a
+  low similarity score.
+* When displaying differences, the colorization has been made more consistent
+  and helpful: red for an actual difference, yellow to indicate that a
+  distance penalty is being applied, and light gray for no penalty (e.g., case
+  changes) or disambiguation data.
+
+There are also three new (or overhauled) configuration options that let you
+customize the way that matches are selected:
+
+* The :ref:`ignored` setting lets you instruct the importer not to show you
+  matches that have a certain penalty applied.
+* The :ref:`preferred` collection of settings specifies a sorted list of
+  preferred countries and media types, or prefer releases closest to the
+  original year for an album.
+* The :ref:`max_rec` settings can now be used for any distance penalty
+  component. The recommendation will be downgraded if a penalty is being
+  applied to the specified field.
+
+And some bug fixes:
+
+* Python 2.6 compatibility for :doc:`/plugins/beatport`. Thanks Wesley Bitter.
+
+
 1.2.0 (June 5, 2013)
 --------------------
 
@@ -58,7 +91,7 @@ In addition, the importer saw various UI enhancements, thanks to Tai Lee:
 * Indicate MusicBrainz ID mismatches.
 
 The calculation of the similarity score for autotagger matches was also
-approved, again thanks to Tai Lee. These changes, in general, help deal with
+improved, again thanks to Tai Lee. These changes, in general, help deal with
 the new metadata sources and help disambiguate between similar releases in the
 same MusicBrainz release group:
 

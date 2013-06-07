@@ -20,8 +20,8 @@ from datetime import datetime, timedelta
 
 import requests
 
-from beets import config
 from beets.autotag.hooks import AlbumInfo, TrackInfo
+from beets.autotag.match import Distance
 from beets.plugins import BeetsPlugin
 
 log = logging.getLogger('beets')
@@ -68,7 +68,7 @@ class BeatportSearch(object):
     release_type = None
 
     def __unicode__(self):
-        return u"<BeatportSearch for {} \"{}\" with {} results>".format(
+        return u'<BeatportSearch for {0} "{1}" with {2} results>'.format(
             self.release_type, self.query, len(self.results))
 
     def __init__(self, query, release_type='release', details=True):
@@ -76,7 +76,7 @@ class BeatportSearch(object):
         self.query = query
         self.release_type = release_type
         response = BeatportAPI.get('catalog/3/search', query=query,
-                                   facets=['fieldType:{}'
+                                   facets=['fieldType:{0}'
                                            .format(release_type)],
                                    perPage=5)
         for item in response:
@@ -97,8 +97,9 @@ class BeatportRelease(BeatportObject):
             artist_str = ", ".join(x[1] for x in self.artists)
         else:
             artist_str = "Various Artists"
-        return u"<BeatportRelease: {} - {} ({})>".format(artist_str, self.name,
-                                                         self.catalog_number)
+        return u"<BeatportRelease: {0} - {1} ({2})>".format(artist_str,
+                                                            self.name,
+                                                            self.catalog_number)
 
     def __init__(self, data):
         BeatportObject.__init__(self, data)
@@ -109,7 +110,7 @@ class BeatportRelease(BeatportObject):
         if 'category' in data:
             self.category = data['category']
         if 'slug' in data:
-            self.url = "http://beatport.com/release/{}/{}".format(
+            self.url = "http://beatport.com/release/{0}/{1}".format(
                 data['slug'], data['id'])
 
     @classmethod
@@ -129,8 +130,8 @@ class BeatportTrack(BeatportObject):
 
     def __unicode__(self):
         artist_str = ", ".join(x[1] for x in self.artists)
-        return u"<BeatportTrack: {} - {} ({})>".format(artist_str, self.name,
-                                                       self.mix_name)
+        return u"<BeatportTrack: {0} - {1} ({2})>".format(artist_str, self.name,
+                                                          self.mix_name)
 
     def __init__(self, data):
         BeatportObject.__init__(self, data)
@@ -141,8 +142,8 @@ class BeatportTrack(BeatportObject):
         if 'length' in data:
             self.length = timedelta(milliseconds=data['lengthMs'])
         if 'slug' in data:
-            self.url = "http://beatport.com/track/{}/{}".format(
-                data['slug'], data['id'])
+            self.url = "http://beatport.com/track/{0}/{1}".format(data['slug'],
+                                                                  data['id'])
 
     @classmethod
     def from_id(cls, beatport_id):
@@ -161,20 +162,16 @@ class BeatportPlugin(BeetsPlugin):
         """Returns the beatport source weight and the maximum source weight
         for albums.
         """
+        dist = Distance()
         if album_info.data_source == 'Beatport':
-            return self.config['source_weight'].as_number() * \
-                config['match']['weight']['source'].as_number(), \
-                config['match']['weight']['source'].as_number()
-        else:
-            return 0.0, 0.0
+            dist.add('source', self.config['source_weight'].as_number())
+        return dist
 
     def track_distance(self, item, info):
         """Returns the beatport source weight and the maximum source weight
         for individual tracks.
         """
-        return self.config['source_weight'].as_number() * \
-            config['match']['weight']['source'].as_number(), \
-            config['match']['weight']['source'].as_number()
+        return Distance()  # FIXME: Need source information for tracks.
 
     def candidates(self, items, artist, release, va_likely):
         """Returns a list of AlbumInfo objects for beatport search results
@@ -206,7 +203,7 @@ class BeatportPlugin(BeetsPlugin):
         or None if the release is not found.
         """
         log.debug('Searching Beatport for release %s' % str(release_id))
-        match  = re.search(r'(^|beatport\.com/release/.+/)(\d+)$', release_id)
+        match = re.search(r'(^|beatport\.com/release/.+/)(\d+)$', release_id)
         if not match:
             return None
         release = BeatportRelease.from_id(match.group(2))
@@ -218,7 +215,7 @@ class BeatportPlugin(BeetsPlugin):
         or None if the track is not found.
         """
         log.debug('Searching Beatport for track %s' % str(track_id))
-        match  = re.search(r'(^|beatport\.com/track/.+/)(\d+)$', track_id)
+        match = re.search(r'(^|beatport\.com/track/.+/)(\d+)$', track_id)
         if not match:
             return None
         bp_track = BeatportTrack.from_id(match.group(2))
@@ -265,7 +262,7 @@ class BeatportPlugin(BeetsPlugin):
         """
         title = track.name
         if track.mix_name != u"Original Mix":
-            title += u" ({})".format(track.mix_name)
+            title += u" ({0})".format(track.mix_name)
         artist, artist_id = self._get_artist(track.artists)
         length = track.length.total_seconds()
 
