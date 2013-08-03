@@ -1,0 +1,12 @@
+language: python
+python:
+    - "2.7"
+    - "2.6"
+install:
+    - travis_retry pip install .
+    - travis_retry pip install pylast flask
+    - "if [[ $TRAVIS_PYTHON_VERSION == '2.6' ]]; then pip install unittest2; fi"
+script: nosetests
+branches:
+    only:
+        - master
