@@ -34,8 +34,14 @@ fieldThatDoesNotExist:foo``, beets will now return no results, whereas
 previous versions would spit out a warning and then list your entire library.
 
 
-1.2.2 (in development)
-----------------------
+1.2.2 (August 27, 2013)
+-----------------------
+
+This is a bugfix release. We're in the midst of preparing for a large change
+in beets 1.3, so 1.2.2 resolves some issues that came up over the last few
+weeks. Stay tuned!
+
+The improvements in this release are:
 
 * A new plugin event, ``item_moved``, is sent when files are moved on disk.
   Thanks to dsedivec.
@@ -47,6 +53,11 @@ previous versions would spit out a warning and then list your entire library.
 * :doc:`/plugins/fetchart`: Look for images in the Cover Art Archive for
   the release group in addition to the specific release. Thanks to Filipe
   Fortes.
+* Fix a race in the importer that could cause files to be deleted before they
+  were imported. This happened when importing one album, importing a duplicate
+  album, and then asking for the first album to be replaced with the second.
+  The situation could only arise when importing music from the library
+  directory and when the two albums are imported close in time.
 
 
 1.2.1 (June 22, 2013)
