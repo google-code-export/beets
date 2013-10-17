@@ -71,7 +71,7 @@ setup(name='beets',
       },
 
       install_requires=[
-          'mutagen>=1.21',
+          'mutagen>=1.22',
           'munkres',
           'unidecode',
           'musicbrainzngs>=0.4',
@@ -79,6 +79,20 @@ setup(name='beets',
       ]
       + (['colorama'] if (sys.platform == 'win32') else [])
       + (['ordereddict'] if sys.version_info < (2, 7, 0) else []),
+
+      # Plugin (optional) dependencies:
+      extras_require={
+          'beatport': ['requests'],
+          'chroma': ['pyacoustid'],
+          'discogs': ['discogs-client'],
+          'echonest_tempo': ['pyechonest'],
+          'lastgenre': ['pylast'],
+          'web': ['flask'],
+      },
+      # Non-Python/non-PyPI plugin dependencies:
+      # replaygain: mp3gain || aacgain
+      # convert: ffmpeg
+      # bpd: pygst
 
       classifiers=[
           'Topic :: Multimedia :: Sound/Audio',

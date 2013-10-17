@@ -49,13 +49,15 @@ def contains_feat(title):
 
 
 def update_metadata(item, feat_part):
-    """Choose how to add new artists to the title and write the new
+    """Choose how to add new artists to the title and set the new
     metadata. Also, print out messages about any changes that are made.
     """
     # In all cases, update the artist fields.
     ui.print_(u'artist: {0} -> {1}'.format(item.artist, item.albumartist))
     item.artist = item.albumartist
-    item.artist_sort, _ = split_on_feat(item.artist_sort)  # Strip featured.
+    if item.artist_sort:
+        # Just strip the featured artist from the sort name.
+        item.artist_sort, _ = split_on_feat(item.artist_sort)
 
     # Only update the title if it does not already contain a featured
     # artist.
@@ -76,7 +78,7 @@ def ft_in_title(item):
     # artist field does not exactly match the album artist field. In
     # that case, we attempt to move the featured artist to the title.
     _, featured = split_on_feat(artist)
-    if featured and albumartist != artist:
+    if featured and albumartist != artist and albumartist:
         ui.print_(displayable_path(item.path))
         feat_part = None
 
