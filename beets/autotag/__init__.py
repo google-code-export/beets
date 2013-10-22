@@ -221,15 +221,18 @@ def apply_metadata(album_info, mapping):
         item.comp = album_info.va
 
         # Miscellaneous metadata.
-        item.albumtype = album_info.albumtype
-        if album_info.label:
-            item.label = album_info.label
-        item.asin = album_info.asin
-        item.catalognum = album_info.catalognum
-        item.script = album_info.script
-        item.language = album_info.language
-        item.country = album_info.country
-        item.albumstatus = album_info.albumstatus
-        item.media = album_info.media
-        item.albumdisambig = album_info.albumdisambig
-        item.disctitle = track_info.disctitle
+        for field in ('albumtype',
+                      'label',
+                      'asin',
+                      'catalognum',
+                      'script',
+                      'language',
+                      'country',
+                      'albumstatus',
+                      'media',
+                      'albumdisambig'):
+            value = getattr(album_info, field)
+            if value is not None:
+                item[field] = value
+        if track_info.disctitle is not None:
+            item.disctitle = track_info.disctitle
