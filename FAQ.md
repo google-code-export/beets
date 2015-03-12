@@ -1,0 +1,1 @@
+Please see the [latest FAQ on GitHub](https://github.com/sampsyo/beets/wiki/FAQ).
